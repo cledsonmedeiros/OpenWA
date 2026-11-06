@@ -65,6 +65,7 @@ import type {
   WSPongResponse,
 } from './dto/ws-messages.dto';
 import { SUBSCRIBABLE_EVENTS, buildRoomName } from './dto/ws-messages.dto';
+import type { ChannelPostProgress } from '../channel/channel-post.types';
 import type { DeliveryStatus, MessageReceiptStatus } from '../../engine/interfaces/whatsapp-engine.interface';
 import { WILDCARD_EXCLUDED_EVENTS } from '../../common/utils/wildcard-events';
 
@@ -1002,6 +1003,11 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
 
   emitCallMissed(sessionId: string, data: Record<string, unknown>) {
     this.emitToRooms(sessionId, 'call.missed', data);
+  }
+
+  /** Live progress of a channel image batch (ChannelPostService). Socket-only, not a webhook event. */
+  emitChannelPostProgress(sessionId: string, data: ChannelPostProgress) {
+    this.emitToRooms(sessionId, 'channel.post.progress', data);
   }
 
   /**

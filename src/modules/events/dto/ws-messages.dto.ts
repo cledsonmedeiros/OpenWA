@@ -31,6 +31,8 @@ export const SUBSCRIBABLE_EVENTS = [
   'call.accepted',
   'call.rejected',
   'call.missed',
+  // Socket-only: live progress of an image batch posted to a channel (not a webhook event).
+  'channel.post.progress',
 ] as const;
 
 // Client -> Server: Subscribe request

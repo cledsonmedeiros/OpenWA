@@ -688,6 +688,34 @@ const makeCapturingServer = () => {
   return { server, emit, rooms };
 };
 
+describe('EventsGateway channel post progress', () => {
+  it('emits channel.post.progress to the session rooms with the payload as given', () => {
+    const gateway = new EventsGateway(
+      { validateApiKey: jest.fn() } as unknown as AuthService,
+      { logWarn: jest.fn().mockResolvedValue(null) } as unknown as AuditService,
+      asConfig() as unknown as ConfigService,
+    );
+    const { server, emit, rooms } = makeCapturingServer();
+    (gateway as unknown as { server: unknown }).server = server;
+    const progress = {
+      postId: '3f9a1c2e-0000-4000-8000-000000000001',
+      channelId: '120363@newsletter',
+      index: 1,
+      total: 3,
+      mode: 'individual' as const,
+      status: 'sent' as const,
+      messageId: 'm2',
+    };
+
+    gateway.emitChannelPostProgress('sess-1', progress);
+
+    const [, sent] = emit.mock.calls[0] as [string, WSEventMessage];
+    expect(sent.payload.event).toBe('channel.post.progress');
+    expect(sent.payload.data).toEqual(progress);
+    expect(rooms).toContain(buildRoomName('sess-1', 'channel.post.progress'));
+  });
+});
+
 describe('EventsGateway inline-media shedding on message events', () => {
   const gwWithCap = (cap?: number) => {
     const config = {
