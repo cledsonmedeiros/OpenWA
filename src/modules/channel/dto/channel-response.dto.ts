@@ -36,6 +36,15 @@ export class ChannelDto {
 
   @ApiPropertyOptional({ description: 'Unix SECONDS the channel was created, when reported.', example: 1786000000 })
   createdAt?: number;
+
+  @ApiPropertyOptional({
+    enum: ['owner', 'admin', 'subscriber', 'unknown'],
+    description:
+      "The session account's role in the channel, when the engine reports one (whatsapp-web.js). A UX " +
+      'signal — the server and WhatsApp still decide whether a send is accepted. Absent on Baileys.',
+    example: 'owner',
+  })
+  role?: 'owner' | 'admin' | 'subscriber' | 'unknown';
 }
 
 export class ChannelMessageDto {

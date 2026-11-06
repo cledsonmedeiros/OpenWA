@@ -61,6 +61,7 @@ interface WireChannel {
   picture?: string;
   verified?: boolean;
   createdAt?: number;
+  role?: 'owner' | 'admin' | 'subscriber' | 'unknown';
 }
 
 /** `ChannelMessage` — the live engine payload, NOT the persisted `MessageRecord`. */

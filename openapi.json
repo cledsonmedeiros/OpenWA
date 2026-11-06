@@ -24471,6 +24471,17 @@
             "type": "number",
             "description": "Unix SECONDS the channel was created, when reported.",
             "example": 1786000000
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "admin",
+              "subscriber",
+              "unknown"
+            ],
+            "description": "The session account's role in the channel, when the engine reports one (whatsapp-web.js). A UX signal — the server and WhatsApp still decide whether a send is accepted. Absent on Baileys.",
+            "example": "owner"
           }
         },
         "required": [

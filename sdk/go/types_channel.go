@@ -17,7 +17,20 @@ type ChannelRecord struct {
 	// CreatedAt is the channel creation time as reported by the engine. Populated by Baileys;
 	// whatsapp-web.js omits it.
 	CreatedAt *int64 `json:"createdAt,omitempty"`
+	// Role is the session account's role in the channel. Reported by whatsapp-web.js; nil on
+	// Baileys. A UX signal only — the server and WhatsApp still decide whether a send is accepted.
+	Role *ChannelRole `json:"role,omitempty"`
 }
+
+// ChannelRole is the session account's role in a channel.
+type ChannelRole string
+
+const (
+	ChannelRoleOwner      ChannelRole = "owner"
+	ChannelRoleAdmin      ChannelRole = "admin"
+	ChannelRoleSubscriber ChannelRole = "subscriber"
+	ChannelRoleUnknown    ChannelRole = "unknown"
+)
 
 // ChannelMessageRecord is a message read live from a channel by Channels.Messages. This is the
 // engine payload (backend ChannelMessage), NOT the persisted MessageRecord — that endpoint reads

@@ -413,6 +413,8 @@ export interface Channel {
   description?: string;
   inviteCode?: string;
   subscriberCount?: number;
+  /** The session account's role (whatsapp-web.js only); decides whether the post bar is shown. */
+  role?: 'owner' | 'admin' | 'subscriber' | 'unknown';
   picture?: string;
   verified?: boolean;
   createdAt?: number;

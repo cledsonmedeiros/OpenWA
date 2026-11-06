@@ -36,6 +36,8 @@ SessionStatus = Literal[
     "failed",
 ]
 ChatState = Literal["typing", "recording", "paused"]
+# The session account's role in a channel (``ChannelRecord.role``).
+ChannelRole = Literal["owner", "admin", "subscriber", "unknown"]
 MessageDirection = Literal["incoming", "outgoing"]
 DeliveryStatus = Literal["pending", "sent", "delivered", "read", "failed"]
 # The three windows WhatsApp accepts for a pinned message: 24 hours, 7 days, 30 days.
@@ -1382,6 +1384,8 @@ class ChannelRecord(TypedDict):
     picture: NotRequired[str]
     verified: NotRequired[bool]
     createdAt: NotRequired[int]
+    # Reported by whatsapp-web.js; absent on Baileys. A UX signal only.
+    role: NotRequired[ChannelRole]
 
 
 # A message read live from a channel by ``channels.messages()`` — the engine payload

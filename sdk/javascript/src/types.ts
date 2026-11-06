@@ -1383,6 +1383,11 @@ export interface ChannelRecord {
   verified?: boolean;
   /** Channel creation time as reported by the engine. Populated by Baileys; whatsapp-web.js omits it. */
   createdAt?: number;
+  /**
+   * The session account's role in the channel. Reported by whatsapp-web.js; absent on Baileys. A UX
+   * signal only — the server and WhatsApp still decide whether a send is accepted.
+   */
+  role?: 'owner' | 'admin' | 'subscriber' | 'unknown';
 }
 
 /**

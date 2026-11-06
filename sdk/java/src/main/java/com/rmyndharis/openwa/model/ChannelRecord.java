@@ -15,4 +15,6 @@ public record ChannelRecord(
     String picture,
     Boolean verified,
     /** Channel creation time as reported by the engine. Populated by Baileys; whatsapp-web.js omits it. */
-    Long createdAt) {}
+    Long createdAt,
+    /** The session account's role. Reported by whatsapp-web.js; {@code null} on Baileys. A UX signal only. */
+    ChannelRole role) {}
