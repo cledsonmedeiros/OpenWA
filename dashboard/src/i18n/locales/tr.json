@@ -197,7 +197,18 @@
       "subscribers_other": "{{count}} abone",
       "attachUnsupported": "Kanallara medya gönderimi whatsapp-web.js motorunda desteklenmiyor.",
       "linkPreview": "Bağlantı önizlemesi oluştur",
-      "postPlaceholder": "Kanala gönder…"
+      "postPlaceholder": "Kanala gönder…",
+      "attachImages": "Görsel ekle",
+      "tooManyImages": "Bir kanal gönderisi en fazla 10 görsel alır; fazlası dışarıda bırakıldı.",
+      "batchTooLarge": "Bu görseller birlikte göndermek için çok büyük; bazılarını kaldırıp tekrar deneyin.",
+      "sending": "{{total}} içinden {{current}} gönderiliyor…",
+      "partialSent": "{{total}} görselden {{sent}} tanesi gönderildi; gönderim orada durdu.",
+      "textPosition": "Metin konumu",
+      "textBefore": "Metin görsellerden önce",
+      "textAfter": "Metin görsellerden sonra",
+      "moveUp": "{{name}} yukarı taşı",
+      "moveDown": "{{name}} aşağı taşı",
+      "removeImage": "{{name}} kaldır"
     },
     "errors": {
       "loadSessions": "Oturumlar yüklenemedi",

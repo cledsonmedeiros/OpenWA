@@ -197,7 +197,18 @@
       "subscribers_other": "{{count}} pelanggan",
       "attachUnsupported": "Mengirim media ke saluran tidak didukung oleh mesin whatsapp-web.js.",
       "linkPreview": "Buat pratinjau tautan",
-      "postPlaceholder": "Posting ke saluran…"
+      "postPlaceholder": "Posting ke saluran…",
+      "attachImages": "Lampirkan gambar",
+      "tooManyImages": "Satu postingan saluran memuat hingga 10 gambar; sisanya tidak disertakan.",
+      "batchTooLarge": "Gambar-gambar ini terlalu besar untuk dikirim bersama; hapus beberapa lalu coba lagi.",
+      "sending": "Mengirim {{current}} dari {{total}}…",
+      "partialSent": "{{sent}} dari {{total}} gambar terposting; pengiriman berhenti di situ.",
+      "textPosition": "Posisi teks",
+      "textBefore": "Teks sebelum gambar",
+      "textAfter": "Teks setelah gambar",
+      "moveUp": "Pindahkan {{name}} ke atas",
+      "moveDown": "Pindahkan {{name}} ke bawah",
+      "removeImage": "Hapus {{name}}"
     },
     "errors": {
       "loadSessions": "Gagal memuat sesi",

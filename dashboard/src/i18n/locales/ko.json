@@ -197,7 +197,18 @@
       "subscribers_other": "구독자 {{count}}명",
       "attachUnsupported": "whatsapp-web.js 엔진에서는 채널로 미디어를 보낼 수 없습니다.",
       "linkPreview": "링크 미리보기 생성",
-      "postPlaceholder": "채널에 게시…"
+      "postPlaceholder": "채널에 게시…",
+      "attachImages": "이미지 첨부",
+      "tooManyImages": "채널 게시물에는 이미지를 최대 10개까지 넣을 수 있어 나머지는 제외되었습니다.",
+      "batchTooLarge": "이미지가 너무 커서 함께 게시할 수 없습니다. 일부를 제거하고 다시 시도하세요.",
+      "sending": "{{total}}개 중 {{current}}번째 전송 중…",
+      "partialSent": "{{total}}개 중 {{sent}}개 이미지가 게시되었고 전송이 거기서 멈췄습니다.",
+      "textPosition": "텍스트 위치",
+      "textBefore": "이미지 앞에 텍스트",
+      "textAfter": "이미지 뒤에 텍스트",
+      "moveUp": "{{name}} 위로 이동",
+      "moveDown": "{{name}} 아래로 이동",
+      "removeImage": "{{name}} 제거"
     },
     "errors": {
       "loadSessions": "세션을 불러오지 못했습니다",

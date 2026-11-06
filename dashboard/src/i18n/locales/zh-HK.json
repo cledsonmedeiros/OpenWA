@@ -197,7 +197,18 @@
       "subscribers_other": "{{count}} 位訂閱者",
       "attachUnsupported": "whatsapp-web.js 引擎不支援向頻道傳送媒體。",
       "linkPreview": "產生連結預覽",
-      "postPlaceholder": "發佈到頻道…"
+      "postPlaceholder": "發佈到頻道…",
+      "attachImages": "附加圖片",
+      "tooManyImages": "一則頻道帖子最多包含 10 張圖片，多出的已被移除。",
+      "batchTooLarge": "這些圖片太大，無法一起發佈；請移除部分後重試。",
+      "sending": "正在傳送第 {{current}} / {{total}} 張…",
+      "partialSent": "已發佈 {{sent}} / {{total}} 張圖片，傳送在此停止。",
+      "textPosition": "文字位置",
+      "textBefore": "文字在圖片前",
+      "textAfter": "文字在圖片後",
+      "moveUp": "上移 {{name}}",
+      "moveDown": "下移 {{name}}",
+      "removeImage": "移除 {{name}}"
     },
     "errors": {
       "loadSessions": "載入工作階段失敗",

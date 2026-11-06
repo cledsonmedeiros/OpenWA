@@ -202,7 +202,18 @@
       "subscribers_many": "{{count}} abonnés",
       "attachUnsupported": "L'envoi de médias vers les chaînes n'est pas pris en charge par le moteur whatsapp-web.js.",
       "linkPreview": "Générer l'aperçu du lien",
-      "postPlaceholder": "Publier sur la chaîne…"
+      "postPlaceholder": "Publier sur la chaîne…",
+      "attachImages": "Joindre des images",
+      "tooManyImages": "Une publication de chaîne accepte jusqu'à 10 images ; les autres ont été écartées.",
+      "batchTooLarge": "Ces images sont trop lourdes pour être publiées ensemble ; retirez-en et réessayez.",
+      "sending": "Envoi {{current}} sur {{total}}…",
+      "partialSent": "{{sent}} images sur {{total}} ont été publiées ; l'envoi s'est arrêté là.",
+      "textPosition": "Position du texte",
+      "textBefore": "Texte avant les images",
+      "textAfter": "Texte après les images",
+      "moveUp": "Monter {{name}}",
+      "moveDown": "Descendre {{name}}",
+      "removeImage": "Retirer {{name}}"
     },
     "errors": {
       "loadSessions": "Échec du chargement des sessions",

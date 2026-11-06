@@ -19,6 +19,10 @@ const sent: Sent[] = [];
 let nextStatus = 200;
 let release: (() => void) | null = null;
 let holdNext = false;
+// The body the next answer carries; the text send answers { messageId } by default.
+let nextBody: unknown = null;
+// Bytes each stubbed JPEG encode produces, to drive the batch size cap.
+let encodedBytes = 3;
 const invalidated: unknown[][] = [];
 
 before(async () => {
@@ -31,11 +35,22 @@ before(async () => {
     });
     if (holdNext) await new Promise<void>(resolve => (release = resolve));
     const ok = nextStatus < 400;
-    return new Response(JSON.stringify(ok ? { messageId: 'm1' } : { message: 'boom' }), {
+    return new Response(JSON.stringify(nextBody ?? (ok ? { messageId: 'm1' } : { message: 'boom' })), {
       status: nextStatus,
       headers: { 'Content-Type': 'application/json' },
     });
   }) as typeof fetch;
+  // Node's URL.createObjectURL takes only its own Blob, not jsdom's File; the tray only needs a src.
+  let objectUrls = 0;
+  URL.createObjectURL = () => `blob:preview-${++objectUrls}`;
+  URL.revokeObjectURL = () => undefined;
+  // jsdom decodes no images and has no 2d canvas: stub the two calls compressImage makes.
+  (globalThis as Record<string, unknown>).createImageBitmap = () => Promise.resolve({ width: 4000, height: 3000, close() {} });
+  const canvasProto = window.HTMLCanvasElement.prototype as unknown as Record<string, unknown>;
+  canvasProto.getContext = () => ({ drawImage() {} });
+  canvasProto.toBlob = function (cb: (b: Blob) => void, type: string) {
+    cb(new Blob([new Uint8Array(encodedBytes)], { type }));
+  };
   const { i18nReady } = await import('../../i18n/index.ts');
   await i18nReady;
   rtl = await import('@testing-library/react');
@@ -76,15 +91,25 @@ afterEach(() => {
   nextStatus = 200;
   holdNext = false;
   release = null;
+  nextBody = null;
+  encodedBytes = 3;
 });
 
 after(() => rtl.cleanup());
 
 const PLACEHOLDER = 'Post to the channel…';
 
-function renderBar() {
-  return rtl.render(wrap(createElement(ChannelPostBar, { sessionId: 's1', channelId: 'c@newsletter' })));
+function renderBar(props: { mediaSupported?: boolean; progress?: unknown } = {}) {
+  return rtl.render(wrap(createElement(ChannelPostBar, { sessionId: 's1', channelId: 'c@newsletter', ...props } as never)));
 }
+
+const fileInput = () => document.querySelector('input[type="file"]') as HTMLInputElement;
+const pick = (names: string[]) =>
+  rtl.fireEvent.change(fileInput(), {
+    target: { files: names.map(n => new window.File(['x'], n, { type: 'image/png' })) },
+  });
+const trayNames = () => [...document.querySelectorAll('.channel-image-tray [data-name]')].map(e => e.getAttribute('data-name'));
+const BATCH_PATH = '/api/sessions/s1/channels/c%40newsletter/posts/images';
 
 function type(text: string) {
   rtl.fireEvent.change(rtl.screen.getByPlaceholderText(PLACEHOLDER), { target: { value: text } });
@@ -155,4 +180,94 @@ test('the attach button is visible but disabled with the engine limitation as to
   const attach = rtl.screen.getByRole('button', { name: title }) as HTMLButtonElement;
   assert.equal(attach.disabled, true);
   assert.equal(attach.title, title);
+});
+
+test('with mediaSupported the attach button opens a multi-image picker', () => {
+  renderBar({ mediaSupported: true });
+  const attach = rtl.screen.getByRole('button', { name: 'Attach images' }) as HTMLButtonElement;
+  assert.equal(attach.disabled, false);
+  assert.equal(fileInput().multiple, true);
+  assert.equal(fileInput().accept, 'image/*');
+});
+
+test('picking more than 10 images keeps the first 10 and says so', async () => {
+  renderBar({ mediaSupported: true });
+  pick(Array.from({ length: 11 }, (_, i) => `p${i}.png`));
+  await rtl.waitFor(() => assert.equal(trayNames().length, 10));
+  assert.ok(rtl.screen.getByText('A channel post takes up to 10 images; the extra ones were left out.'));
+});
+
+test('moving an image down reorders the tray, and the batch goes out in that order with the text position', async () => {
+  nextBody = { mode: 'individual', sent: [0, 1, 2].map(index => ({ index, messageId: `m${index}` })) };
+  renderBar({ mediaSupported: true });
+  pick(['a.png', 'b.png', 'c.png']);
+  await rtl.waitFor(() => assert.deepEqual(trayNames(), ['a.png', 'b.png', 'c.png']));
+  rtl.fireEvent.click(rtl.screen.getByRole('button', { name: 'Move a.png down' }));
+  assert.deepEqual(trayNames(), ['b.png', 'a.png', 'c.png']);
+  rtl.fireEvent.change(rtl.screen.getByRole('combobox', { name: 'Text position' }), { target: { value: 'before' } });
+  type('legenda');
+  rtl.fireEvent.click(sendButton());
+
+  await rtl.waitFor(() => assert.equal(sent.length, 1));
+  assert.equal(sent[0].path, BATCH_PATH);
+  const body = sent[0].body as { postId: string; images: { mimetype: string }[]; text: string; textPosition: string };
+  assert.match(body.postId, /^[0-9a-f-]{36}$/);
+  assert.equal(body.images.length, 3);
+  assert.equal(body.images[0].mimetype, 'image/jpeg');
+  assert.equal(body.text, 'legenda');
+  assert.equal(body.textPosition, 'before');
+  await rtl.waitFor(() => assert.equal(trayNames().length, 0));
+});
+
+test('progress frames for this batch show "n of N" while it is sending', async () => {
+  holdNext = true;
+  const { rerender } = renderBar({ mediaSupported: true });
+  pick(['a.png', 'b.png', 'c.png']);
+  await rtl.waitFor(() => assert.equal(trayNames().length, 3));
+  rtl.fireEvent.click(sendButton());
+  await rtl.waitFor(() => assert.equal(sent.length, 1));
+  const postId = (sent[0].body as { postId: string }).postId;
+  rerender(
+    wrap(
+      createElement(ChannelPostBar, {
+        sessionId: 's1',
+        channelId: 'c@newsletter',
+        mediaSupported: true,
+        progress: { postId, channelId: 'c@newsletter', index: 1, total: 3, mode: 'individual', status: 'sent' },
+      } as never),
+    ),
+  );
+  assert.ok(rtl.screen.getByText('Sending 2 of 3…'));
+  nextBody = { mode: 'individual', sent: [] };
+  release!();
+});
+
+test('without a socket the final result still comes from the HTTP answer', async () => {
+  nextBody = { mode: 'individual', sent: [{ index: 0, messageId: 'm0' }] };
+  renderBar({ mediaSupported: true });
+  pick(['a.png']);
+  await rtl.waitFor(() => assert.equal(trayNames().length, 1));
+  rtl.fireEvent.click(sendButton());
+  await rtl.waitFor(() => assert.equal(trayNames().length, 0));
+});
+
+test('a partial batch says what went out and keeps the unsent images in the tray', async () => {
+  nextStatus = 207;
+  nextBody = { mode: 'individual', sent: [{ index: 0, messageId: 'm0' }], failedAt: 1, error: 'boom' };
+  renderBar({ mediaSupported: true });
+  pick(['a.png', 'b.png', 'c.png']);
+  await rtl.waitFor(() => assert.equal(trayNames().length, 3));
+  rtl.fireEvent.click(sendButton());
+  await rtl.waitFor(() => assert.ok(rtl.screen.getByText('1 of 3 images were posted; the batch stopped there.')));
+  assert.deepEqual(trayNames(), ['b.png', 'c.png']);
+});
+
+test('a batch over 18 MiB after compression warns and sends nothing', async () => {
+  encodedBytes = 2 * 1024 * 1024;
+  renderBar({ mediaSupported: true });
+  pick(Array.from({ length: 10 }, (_, i) => `p${i}.png`));
+  await rtl.waitFor(() => assert.equal(trayNames().length, 10));
+  rtl.fireEvent.click(sendButton());
+  await rtl.waitFor(() => assert.ok(rtl.screen.getByText('These images are too large to post together; remove some and try again.')));
+  assert.equal(sent.length, 0);
 });

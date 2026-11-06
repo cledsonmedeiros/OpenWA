@@ -197,7 +197,18 @@
       "subscribers_other": "{{count}} सदस्य",
       "attachUnsupported": "whatsapp-web.js इंजन पर चैनलों में मीडिया भेजना समर्थित नहीं है।",
       "linkPreview": "लिंक पूर्वावलोकन बनाएँ",
-      "postPlaceholder": "चैनल में पोस्ट करें…"
+      "postPlaceholder": "चैनल में पोस्ट करें…",
+      "attachImages": "छवियाँ संलग्न करें",
+      "tooManyImages": "एक चैनल पोस्ट में अधिकतम 10 छवियाँ होती हैं; बाकी छोड़ दी गईं।",
+      "batchTooLarge": "ये छवियाँ एक साथ पोस्ट करने के लिए बहुत बड़ी हैं; कुछ हटाकर फिर कोशिश करें।",
+      "sending": "{{total}} में से {{current}} भेजी जा रही है…",
+      "partialSent": "{{total}} में से {{sent}} छवियाँ पोस्ट हुईं; भेजना वहीं रुक गया।",
+      "textPosition": "टेक्स्ट की स्थिति",
+      "textBefore": "छवियों से पहले टेक्स्ट",
+      "textAfter": "छवियों के बाद टेक्स्ट",
+      "moveUp": "{{name}} को ऊपर ले जाएँ",
+      "moveDown": "{{name}} को नीचे ले जाएँ",
+      "removeImage": "{{name}} हटाएँ"
     },
     "errors": {
       "loadSessions": "सत्र लोड करने में विफल",

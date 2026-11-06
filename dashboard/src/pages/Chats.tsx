@@ -40,6 +40,7 @@ import {
   type Channel,
   type SearchHit,
   type ContactStatusGroup,
+  type ChannelPostProgress,
 } from '../services/api';
 import {
   applyMessageEdit,
@@ -1012,6 +1013,19 @@ export function Chats() {
     [queryClient],
   );
 
+  // The latest channel batch progress frame. The post bar keeps only the frames of its own postId, so
+  // one slot is enough; a frame from another session is dropped here.
+  const [channelPostProgress, setChannelPostProgress] = useState<ChannelPostProgress | null>(null);
+  const selectedSessionIdRef = useRef(selectedSessionId);
+  useEffect(() => {
+    selectedSessionIdRef.current = selectedSessionId;
+  }, [selectedSessionId]);
+  const handleChannelPostProgress = useCallback((event: ChannelPostProgress & { sessionId: string }) => {
+    if (event.sessionId !== selectedSessionIdRef.current) return;
+    const { postId, channelId, index, total, mode, status, messageId } = event;
+    setChannelPostProgress({ postId, channelId, index, total, mode, status, messageId });
+  }, []);
+
   // The session switcher shows every session's state and lets only a ready one be picked, so both lists
   // follow the live session feed the Sessions page uses (the '*' room, or one room per listed session for
   // a session-scoped key) instead of the read at mount alone. The open session stays selectable when it
@@ -1086,6 +1100,7 @@ export function Chats() {
       onMessageRevoked: handleIncomingMessageRevoked,
       onMessageEdited: handleIncomingMessageEdited,
       onStatusReceived: handleStatusReceived,
+      onChannelPostProgress: handleChannelPostProgress,
     }),
     [
       handleSessionStatus,
@@ -1096,6 +1111,7 @@ export function Chats() {
       handleIncomingMessageRevoked,
       handleIncomingMessageEdited,
       handleStatusReceived,
+      handleChannelPostProgress,
     ],
   );
   const { isConnected, connectionFailed, reconnect, subscribe, unsubscribe, rejoins } = useWebSocket(wsEvents);
@@ -1201,6 +1217,7 @@ export function Chats() {
         'message.revoked',
         'message.edited',
         'status.received',
+        'channel.post.progress',
       ]);
       // Events sent while the socket was down were not delivered: after a reconnect, a cached thread
       // may miss some. Mark them stale the same way.
@@ -2266,7 +2283,12 @@ export function Chats() {
                   )}
                 </div>
                 {selectedSessionId && canPostToChannel(activeChannel, canWrite) && (
-                  <ChannelPostBar sessionId={selectedSessionId} channelId={activeChannel.id} />
+                  <ChannelPostBar
+                    sessionId={selectedSessionId}
+                    channelId={activeChannel.id}
+                    mediaSupported={activeChannel.mediaSupported === true}
+                    progress={channelPostProgress}
+                  />
                 )}
               </div>
             ) : activeStatusGroup ? (

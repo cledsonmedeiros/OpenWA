@@ -218,7 +218,18 @@
       "subscribers_zero": "{{count}} مشترك",
       "attachUnsupported": "إرسال الوسائط إلى القنوات غير مدعوم في محرك whatsapp-web.js.",
       "linkPreview": "إنشاء معاينة للرابط",
-      "postPlaceholder": "انشر في القناة…"
+      "postPlaceholder": "انشر في القناة…",
+      "attachImages": "إرفاق صور",
+      "tooManyImages": "يقبل منشور القناة حتى 10 صور؛ تم استبعاد الصور الزائدة.",
+      "batchTooLarge": "هذه الصور كبيرة جدًا لنشرها معًا؛ أزل بعضها وحاول مرة أخرى.",
+      "sending": "جارٍ إرسال {{current}} من {{total}}…",
+      "partialSent": "تم نشر {{sent}} من {{total}} صور؛ توقف الإرسال عند هذا الحد.",
+      "textPosition": "موضع النص",
+      "textBefore": "النص قبل الصور",
+      "textAfter": "النص بعد الصور",
+      "moveUp": "نقل {{name}} لأعلى",
+      "moveDown": "نقل {{name}} لأسفل",
+      "removeImage": "إزالة {{name}}"
     },
     "errors": {
       "loadSessions": "فشل تحميل الجلسات",

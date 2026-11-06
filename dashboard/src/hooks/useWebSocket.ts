@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { API_ORIGIN } from '../services/api';
+import { API_ORIGIN, type ChannelPostProgress } from '../services/api';
 import { resolveSocketUrl, warnIfInsecureHttpUrl } from '../utils/urlSecurity';
 
 interface SessionStatusEvent {
@@ -106,6 +106,8 @@ interface WebSocketEvents {
   onMessageEdited?: (event: MessageEditedEvent) => void;
   onStatusReceived?: (event: StatusReceivedEvent) => void;
   onSessionRestriction?: (event: SessionRestrictionEvent) => void;
+  /** Live progress of a channel image batch (socket-only `channel.post.progress`). */
+  onChannelPostProgress?: (event: ChannelPostProgress & { sessionId: string }) => void;
   onSubscribed?: (event: SubscribedEvent) => void;
   onServerError?: (event: ServerErrorEvent) => void;
 }
@@ -448,6 +450,10 @@ export function useWebSocket(events: WebSocketEvents = {}) {
           break;
         case 'session.restriction':
           events.onSessionRestriction?.({ sessionId, timestamp: msg.timestamp });
+          break;
+        case 'channel.post.progress':
+          if (typeof data.postId !== 'string' || typeof data.index !== 'number' || typeof data.total !== 'number') break;
+          events.onChannelPostProgress?.({ sessionId, ...(data as unknown as ChannelPostProgress) });
           break;
         case 'message.ack':
           events.onMessageAck?.({

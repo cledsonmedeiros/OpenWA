@@ -422,6 +422,35 @@ export interface Channel {
   createdAt?: number;
 }
 
+/** Body of POST /sessions/:id/channels/:channelId/posts/images. */
+export interface PostChannelImagesRequest {
+  postId: string;
+  images: { url?: string; base64?: string; mimetype?: string }[];
+  text?: string;
+  textPosition?: 'before' | 'after';
+  linkPreview?: boolean;
+}
+
+/** Its answer; `failedAt` set means the batch stopped there after something went out. */
+export interface ChannelPostResult {
+  mode: 'album' | 'individual';
+  sent: { index: number; messageId: string }[];
+  text?: { messageId: string };
+  failedAt?: number;
+  error?: string;
+}
+
+/** A `channel.post.progress` socket frame. */
+export interface ChannelPostProgress {
+  postId: string;
+  channelId: string;
+  index: number;
+  total: number;
+  mode: 'album' | 'individual';
+  status: 'sent' | 'failed' | 'done';
+  messageId?: string;
+}
+
 export interface ChannelMessage {
   id: string;
   body: string;
@@ -1080,6 +1109,11 @@ export const sessionApi = {
       signal,
     ),
   getSubscribedChannels: (id: string) => request<Channel[]>(`/sessions/${id}/channels`),
+  postChannelImages: (id: string, channelId: string, body: PostChannelImagesRequest) =>
+    request<ChannelPostResult>(`/sessions/${id}/channels/${encodeURIComponent(channelId)}/posts/images`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   getChannelMessages: (id: string, channelId: string, limit = 50) =>
     request<ChannelMessage[]>(`/sessions/${id}/channels/${encodeURIComponent(channelId)}/messages?limit=${limit}`),
   getContactStatuses: (id: string) => request<{ statuses: StatusUpdate[] }>(`/sessions/${id}/status`),

@@ -3989,6 +3989,7 @@ const MESSAGE_FEED_EVENTS = [
   'message.revoked',
   'message.edited',
   'status.received',
+  'channel.post.progress',
 ];
 
 /**

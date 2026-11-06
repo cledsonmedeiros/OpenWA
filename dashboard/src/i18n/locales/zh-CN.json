@@ -197,7 +197,18 @@
       "subscribers_other": "{{count}} 位订阅者",
       "attachUnsupported": "whatsapp-web.js 引擎不支持向频道发送媒体。",
       "linkPreview": "生成链接预览",
-      "postPlaceholder": "发布到频道…"
+      "postPlaceholder": "发布到频道…",
+      "attachImages": "附加图片",
+      "tooManyImages": "一条频道帖子最多包含 10 张图片，多出的已被移除。",
+      "batchTooLarge": "这些图片太大，无法一起发布；请移除一些后重试。",
+      "sending": "正在发送第 {{current}} / {{total}} 张…",
+      "partialSent": "已发布 {{sent}} / {{total}} 张图片，发送在此停止。",
+      "textPosition": "文字位置",
+      "textBefore": "文字在图片前",
+      "textAfter": "文字在图片后",
+      "moveUp": "上移 {{name}}",
+      "moveDown": "下移 {{name}}",
+      "removeImage": "移除 {{name}}"
     },
     "errors": {
       "loadSessions": "加载会话失败",

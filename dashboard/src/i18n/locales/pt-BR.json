@@ -202,7 +202,18 @@
       "subscribers_many": "{{count}} inscritos",
       "attachUnsupported": "Envio de mídia para canais não é suportado no engine whatsapp-web.js.",
       "linkPreview": "Gerar preview do link",
-      "postPlaceholder": "Publicar no canal…"
+      "postPlaceholder": "Publicar no canal…",
+      "attachImages": "Anexar imagens",
+      "tooManyImages": "Um post de canal aceita até 10 imagens; as excedentes ficaram de fora.",
+      "batchTooLarge": "Estas imagens são grandes demais para publicar juntas; remova algumas e tente de novo.",
+      "sending": "Enviando {{current}} de {{total}}…",
+      "partialSent": "{{sent}} de {{total}} imagens foram publicadas; o envio parou aí.",
+      "textPosition": "Posição do texto",
+      "textBefore": "Texto antes das imagens",
+      "textAfter": "Texto depois das imagens",
+      "moveUp": "Mover {{name}} para cima",
+      "moveDown": "Mover {{name}} para baixo",
+      "removeImage": "Remover {{name}}"
     },
     "errors": {
       "loadSessions": "Erro ao carregar as sessões",

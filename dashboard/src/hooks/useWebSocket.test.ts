@@ -635,3 +635,19 @@ test('one join and two later failures of three sends in flight are reported once
   }
   assert.deepEqual(outcomes, expected);
 });
+
+test('a channel.post.progress frame reaches onChannelPostProgress with its payload', () => {
+  const received: unknown[] = [];
+  rtl.renderHook(() => useWebSocket({ onChannelPostProgress: e => received.push(e) }));
+  const socket = lastSocket();
+  assert.ok(socket);
+  const data = { postId: 'p1', channelId: 'c@newsletter', index: 1, total: 3, mode: 'individual', status: 'sent', messageId: 'm1' };
+  rtl.act(() =>
+    socket.receive('message', {
+      type: 'event',
+      timestamp: '2026-11-06T00:00:00.000Z',
+      payload: { event: 'channel.post.progress', sessionId: 's1', data },
+    }),
+  );
+  assert.deepEqual(received, [{ sessionId: 's1', ...data }]);
+});

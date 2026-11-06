@@ -208,7 +208,18 @@
       "subscribers_two": "שני מנויים",
       "attachUnsupported": "שליחת מדיה לערוצים אינה נתמכת במנוע whatsapp-web.js.",
       "linkPreview": "יצירת תצוגה מקדימה לקישור",
-      "postPlaceholder": "פרסום בערוץ…"
+      "postPlaceholder": "פרסום בערוץ…",
+      "attachImages": "צירוף תמונות",
+      "tooManyImages": "פוסט בערוץ מקבל עד 10 תמונות; העודפות הושמטו.",
+      "batchTooLarge": "התמונות גדולות מדי לפרסום יחד; הסירו חלק ונסו שוב.",
+      "sending": "שולח {{current}} מתוך {{total}}…",
+      "partialSent": "פורסמו {{sent}} מתוך {{total}} תמונות; השליחה נעצרה שם.",
+      "textPosition": "מיקום הטקסט",
+      "textBefore": "טקסט לפני התמונות",
+      "textAfter": "טקסט אחרי התמונות",
+      "moveUp": "הזזת {{name}} למעלה",
+      "moveDown": "הזזת {{name}} למטה",
+      "removeImage": "הסרת {{name}}"
     },
     "errors": {
       "loadSessions": "טעינת הסשנים נכשלה",

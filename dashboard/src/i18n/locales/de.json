@@ -197,7 +197,18 @@
       "subscribers_other": "{{count}} Abonnenten",
       "attachUnsupported": "Das Senden von Medien an Kanäle wird von der whatsapp-web.js-Engine nicht unterstützt.",
       "linkPreview": "Linkvorschau erzeugen",
-      "postPlaceholder": "Im Kanal posten…"
+      "postPlaceholder": "Im Kanal posten…",
+      "attachImages": "Bilder anhängen",
+      "tooManyImages": "Ein Kanalbeitrag nimmt bis zu 10 Bilder; die übrigen wurden weggelassen.",
+      "batchTooLarge": "Diese Bilder sind zusammen zu groß; entferne einige und versuche es erneut.",
+      "sending": "Sende {{current}} von {{total}}…",
+      "partialSent": "{{sent}} von {{total}} Bildern wurden gepostet; der Versand hat dort angehalten.",
+      "textPosition": "Textposition",
+      "textBefore": "Text vor den Bildern",
+      "textAfter": "Text nach den Bildern",
+      "moveUp": "{{name}} nach oben",
+      "moveDown": "{{name}} nach unten",
+      "removeImage": "{{name}} entfernen"
     },
     "errors": {
       "loadSessions": "Sitzungen konnten nicht geladen werden",

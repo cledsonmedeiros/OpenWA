@@ -197,7 +197,18 @@
       "subscribers_other": "{{count}} subscribers",
       "attachUnsupported": "Sending media to channels is not supported on the whatsapp-web.js engine.",
       "linkPreview": "Generate link preview",
-      "postPlaceholder": "Post to the channel…"
+      "postPlaceholder": "Post to the channel…",
+      "attachImages": "Attach images",
+      "tooManyImages": "A channel post takes up to 10 images; the extra ones were left out.",
+      "batchTooLarge": "These images are too large to post together; remove some and try again.",
+      "sending": "Sending {{current}} of {{total}}…",
+      "partialSent": "{{sent}} of {{total}} images were posted; the batch stopped there.",
+      "textPosition": "Text position",
+      "textBefore": "Text before the images",
+      "textAfter": "Text after the images",
+      "moveUp": "Move {{name}} up",
+      "moveDown": "Move {{name}} down",
+      "removeImage": "Remove {{name}}"
     },
     "errors": {
       "loadSessions": "Failed to load sessions",
