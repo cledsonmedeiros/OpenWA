@@ -1289,10 +1289,10 @@ export const auditApi = {
 // =============================================================================
 
 export const messageApi = {
-  sendText: (sessionId: string, chatId: string, text: string) =>
+  sendText: (sessionId: string, chatId: string, text: string, options?: { linkPreview?: boolean }) =>
     request<MessageResponse>(`/sessions/${sessionId}/messages/send-text`, {
       method: 'POST',
-      body: JSON.stringify({ chatId, text }),
+      body: JSON.stringify({ chatId, text, ...options }),
     }),
   sendMedia: (
     sessionId: string,
