@@ -270,6 +270,10 @@ func isIdempotentSendPath(path string) bool {
 		path = path[:i]
 	}
 	parts := strings.Split(path, "/")
+	if len(parts) == 8 && parts[1] == "api" && parts[2] == "sessions" && parts[4] == "channels" &&
+		parts[6] == "posts" && parts[7] == "images" {
+		return true // the channel image batch: Channels.PostImages
+	}
 	return len(parts) == 6 && parts[1] == "api" && parts[2] == "sessions" && parts[4] == "messages" &&
 		idempotentSendSegments[parts[5]]
 }

@@ -59,6 +59,25 @@ class ChannelsResource
     }
 
     /**
+     * Post 1-10 images to a channel the session owns or administers, one post per image in order, plus
+     * an optional text post. Progress arrives on the socket as `channel.post.progress`. Nothing is
+     * re-sent: a failure after something went out answers with `failedAt` set.
+     *
+     * @param array<string,mixed> $body
+     * @return array<string,mixed>
+     */
+    public function postImages(string $sessionId, string $channelId, array $body, ?string $idempotencyKey = null): array
+    {
+        return $this->http->request(
+            'POST',
+            "/api/sessions/{$this->http->encodeSegment($sessionId)}/channels/{$this->http->encodeSegment($channelId)}/posts/images",
+            [],
+            $body,
+            $idempotencyKey,
+        );
+    }
+
+    /**
      * Delete a channel this account owns. Irreversible; every subscriber loses it.
      *
      * Note the path: unsubscribe is the DELETE route, and the two are deliberately not reachable by

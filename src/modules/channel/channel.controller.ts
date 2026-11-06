@@ -1,7 +1,12 @@
-import { Controller, Get, Post, Delete, Param, Body, Query, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Param, Body, Query, HttpCode, HttpStatus, Res } from '@nestjs/common';
+import type { Response } from 'express';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBody, ApiQuery } from '@nestjs/swagger';
 import { ChannelAckResponseDto, ChannelDto, ChannelMessageDto } from './dto/channel-response.dto';
 import { ChannelService } from './channel.service';
+import { ChannelPostService } from './channel-post.service';
+import { PostChannelImagesDto } from './dto/post-channel-images.dto';
+import { ChannelPostResultDto } from './dto/channel-post-result.dto';
+import { IdempotentSend } from '../message/idempotency/idempotent-send.decorator';
 import { SubscribeChannelDto } from './dto/subscribe-channel.dto';
 import { CreateChannelDto } from './dto/create-channel.dto';
 import { MuteChannelDto } from './dto/mute-channel.dto';
@@ -29,7 +34,10 @@ const THROTTLED_503 =
 @ApiTags('channels')
 @Controller('sessions/:sessionId/channels')
 export class ChannelController {
-  constructor(private readonly channelService: ChannelService) {}
+  constructor(
+    private readonly channelService: ChannelService,
+    private readonly channelPostService: ChannelPostService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'Get all subscribed channels/newsletters' })
@@ -125,6 +133,49 @@ export class ChannelController {
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
   async create(@Param('sessionId') sessionId: string, @Body() dto: CreateChannelDto) {
     return this.channelService.createChannel(sessionId, dto.name, dto.description);
+  }
+
+  // No @ChatScoped: a key restricted to specific chats gets 403 here, like on every channel route.
+  @Post(':channelId/posts/images')
+  @IdempotentSend()
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Post an ordered batch of images to a channel',
+    description:
+      'Posts 1 to 10 images to a channel the session owns or administers, one post per image in the order ' +
+      'given, plus an optional text post before or after them. Each send goes through the regular message ' +
+      'pipeline. Live progress is emitted on the socket as `channel.post.progress`, correlated by `postId`. ' +
+      'Nothing is ever re-sent: when a send fails after something already went out the batch stops and ' +
+      'answers 207 with what was sent, so an `Idempotency-Key` retry replays that answer. A replay is ' +
+      'answered 201 with the stored body: `failedAt` in the body, not the status, marks a partial batch.',
+  })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiParam({ name: 'channelId', description: 'Channel ID (`<id>@newsletter`)' })
+  @ApiBody({ type: PostChannelImagesDto })
+  @ApiResponse({ status: 201, description: 'Every post went out', type: ChannelPostResultDto })
+  @ApiResponse({
+    status: 207,
+    description: 'Some posts went out and then a send failed; `failedAt` names where the batch stopped',
+    type: ChannelPostResultDto,
+  })
+  @ApiResponse({ status: 400, description: 'Validation failed for the batch; nothing was sent' })
+  @ApiResponse({ status: 403, description: 'A key restricted to specific chats cannot post to channels' })
+  @ApiResponse({ status: 404, description: CHANNEL_NOT_FOUND_404 })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
+  @ApiResponse({
+    status: 501,
+    description: 'The engine cannot send images to this channel (`mediaSupported` is not true); nothing was sent',
+  })
+  async postImages(
+    @Param('sessionId') sessionId: string,
+    @Param('channelId') channelId: string,
+    @Body() dto: PostChannelImagesDto,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<ChannelPostResultDto> {
+    const result = await this.channelPostService.postImages(sessionId, channelId, dto);
+    res.status(result.status);
+    return result.body;
   }
 
   @Post(':channelId/delete')

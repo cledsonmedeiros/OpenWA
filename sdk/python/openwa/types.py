@@ -38,6 +38,8 @@ SessionStatus = Literal[
 ChatState = Literal["typing", "recording", "paused"]
 # The session account's role in a channel (``ChannelRecord.role``).
 ChannelRole = Literal["owner", "admin", "subscriber", "unknown"]
+ChannelPostMode = Literal["album", "individual"]
+ChannelTextPosition = Literal["before", "after"]
 MessageDirection = Literal["incoming", "outgoing"]
 DeliveryStatus = Literal["pending", "sent", "delivered", "read", "failed"]
 # The three windows WhatsApp accepts for a pinned message: 24 hours, 7 days, 30 days.
@@ -1388,6 +1390,41 @@ class ChannelRecord(TypedDict):
     role: NotRequired[ChannelRole]
     # Whether an image can be sent to the channel (whatsapp-web.js with the channel media patch).
     mediaSupported: NotRequired[bool]
+
+
+# One image of a channel batch: ``url``, or ``base64`` with its ``mimetype`` (an image/* type).
+class ChannelImageInput(TypedDict):
+    url: NotRequired[str]
+    base64: NotRequired[str]
+    mimetype: NotRequired[str]
+
+
+# Body of ``channels.post_images()``: 1-10 images posted in order, plus an optional text post.
+# ``postId`` is a caller-generated UUID correlating the ``channel.post.progress`` socket frames.
+class PostChannelImagesRequest(TypedDict):
+    postId: str
+    images: List[ChannelImageInput]
+    text: NotRequired[str]
+    textPosition: NotRequired[ChannelTextPosition]
+    linkPreview: NotRequired[bool]
+
+
+class ChannelPostSentItem(TypedDict):
+    index: int
+    messageId: str
+
+
+class ChannelPostText(TypedDict):
+    messageId: str
+
+
+# ``failedAt`` set means the batch stopped there after something went out; nothing is re-sent.
+class ChannelPostResult(TypedDict):
+    mode: ChannelPostMode
+    sent: List[ChannelPostSentItem]
+    text: NotRequired[ChannelPostText]
+    failedAt: NotRequired[int]
+    error: NotRequired[str]
 
 
 # A message read live from a channel by ``channels.messages()`` — the engine payload

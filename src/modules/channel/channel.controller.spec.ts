@@ -4,7 +4,7 @@ import { ChannelService } from './channel.service';
 describe('ChannelController.getMessages limit parsing', () => {
   const build = () => {
     const service = { getChannelMessages: jest.fn().mockResolvedValue([]) };
-    const controller = new ChannelController(service as unknown as ChannelService);
+    const controller = new ChannelController(service as unknown as ChannelService, {} as never);
     return { controller, service };
   };
 
@@ -32,7 +32,7 @@ describe('ChannelController.demoteAdmin', () => {
     // The argument order is the whole risk here: sessionId, channelId and userId are all strings,
     // so a swap compiles, type-checks and would demote the wrong party in the wrong channel.
     const service = { demoteChannelAdmin: jest.fn().mockResolvedValue(undefined) };
-    const controller = new ChannelController(service as unknown as ChannelService);
+    const controller = new ChannelController(service as unknown as ChannelService, {} as never);
     await expect(controller.demoteAdmin('s1', 'ch1@newsletter', { userId: '628@c.us' })).resolves.toEqual({
       success: true,
     });
@@ -41,7 +41,7 @@ describe('ChannelController.demoteAdmin', () => {
 
   it('lets an engine refusal propagate instead of answering success', async () => {
     const service = { demoteChannelAdmin: jest.fn().mockRejectedValue(new Error('refused')) };
-    const controller = new ChannelController(service as unknown as ChannelService);
+    const controller = new ChannelController(service as unknown as ChannelService, {} as never);
     await expect(controller.demoteAdmin('s1', 'ch1@newsletter', { userId: '628@c.us' })).rejects.toThrow('refused');
   });
 });
@@ -51,7 +51,7 @@ describe('ChannelController.transferOwnership', () => {
     // sessionId, channelId and newOwnerId are all strings, so a swap compiles and type-checks —
     // and this operation is irreversible, which makes the wrong target unrecoverable.
     const service = { transferChannelOwnership: jest.fn().mockResolvedValue(undefined) };
-    const controller = new ChannelController(service as unknown as ChannelService);
+    const controller = new ChannelController(service as unknown as ChannelService, {} as never);
     await expect(controller.transferOwnership('s1', 'ch1@newsletter', { newOwnerId: '628@c.us' })).resolves.toEqual({
       success: true,
     });
@@ -60,7 +60,7 @@ describe('ChannelController.transferOwnership', () => {
 
   it('lets an engine refusal propagate instead of answering success', async () => {
     const service = { transferChannelOwnership: jest.fn().mockRejectedValue(new Error('refused')) };
-    const controller = new ChannelController(service as unknown as ChannelService);
+    const controller = new ChannelController(service as unknown as ChannelService, {} as never);
     await expect(controller.transferOwnership('s1', 'ch1@newsletter', { newOwnerId: '628@c.us' })).rejects.toThrow(
       'refused',
     );
@@ -128,5 +128,20 @@ describe('ChannelController OpenAPI 503 responses', () => {
 
   it('does not describe the lookup 503 as a change that may have applied', () => {
     expect(responsesOf('findOne')['503']?.description).not.toContain('applied');
+  });
+});
+
+describe('ChannelController.postImages', () => {
+  it('answers with the status the batch reached and returns its body', async () => {
+    const body = { mode: 'individual', sent: [{ index: 0, messageId: 'm0' }], failedAt: 1, error: 'boom' };
+    const posts = { postImages: jest.fn().mockResolvedValue({ status: 207, body }) };
+    const controller = new ChannelController({} as unknown as ChannelService, posts as never);
+    const res = { status: jest.fn() };
+
+    const out = await controller.postImages('s1', 'c@newsletter', { postId: 'p', images: [] }, res as never);
+
+    expect(res.status).toHaveBeenCalledWith(207);
+    expect(out).toBe(body);
+    expect(posts.postImages).toHaveBeenCalledWith('s1', 'c@newsletter', { postId: 'p', images: [] });
   });
 });

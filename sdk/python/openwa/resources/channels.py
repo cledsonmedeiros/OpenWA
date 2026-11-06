@@ -19,6 +19,8 @@ from ..types import (
     SuccessResult,
     DemoteChannelAdminRequest,
     TransferChannelOwnershipRequest,
+    PostChannelImagesRequest,
+    ChannelPostResult,
 )
 
 if TYPE_CHECKING:
@@ -47,6 +49,26 @@ class ChannelsResource:
     def create(self, session_id: str, body: CreateChannelRequest) -> ChannelRecord:
         """Create a channel. The account owns it, which is what makes delete() possible later."""
         return self._http.request("POST", f"/api/sessions/{quote_segment(session_id)}/channels", body=body)
+
+    def post_images(
+        self,
+        session_id: str,
+        channel_id: str,
+        body: PostChannelImagesRequest,
+        *,
+        idempotency_key: str | None = None,
+    ) -> ChannelPostResult:
+        """Post 1-10 images to a channel the session owns or administers, one post per image in order.
+
+        Progress arrives on the socket as ``channel.post.progress``. Nothing is re-sent: a failure after
+        something went out answers with ``failedAt`` set; an idempotency key makes a retry replay it.
+        """
+        return self._http.request(
+            "POST",
+            f"/api/sessions/{quote_segment(session_id)}/channels/{quote_segment(channel_id)}/posts/images",
+            body=body,
+            idempotency_key=idempotency_key,
+        )
 
     def delete(self, session_id: str, channel_id: str) -> SuccessResult:
         """Delete a channel this account owns. Irreversible; every subscriber loses it.

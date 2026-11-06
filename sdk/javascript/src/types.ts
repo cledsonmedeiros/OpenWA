@@ -1392,6 +1392,45 @@ export interface ChannelRecord {
   mediaSupported?: boolean;
 }
 
+/** One image of a channel batch: `url`, or `base64` with its `mimetype` (an image/* type). */
+export interface ChannelImageInput {
+  url?: string;
+  base64?: string;
+  mimetype?: string;
+}
+
+/** Body of `channels.postImages()`: 1-10 images posted in order, plus an optional text post. */
+export interface PostChannelImagesRequest {
+  /** Caller-generated UUID correlating the `channel.post.progress` socket frames with this request. */
+  postId: string;
+  images: ChannelImageInput[];
+  text?: string;
+  /** Where the text post goes. Default `after`. */
+  textPosition?: 'before' | 'after';
+  linkPreview?: boolean;
+}
+
+export interface ChannelPostSentItem {
+  index: number;
+  messageId: string;
+}
+
+export interface ChannelPostText {
+  messageId: string;
+}
+
+/**
+ * Result of `channels.postImages()`. `failedAt` set means the batch stopped there after something
+ * went out (HTTP 207, or 201 on an idempotent replay); nothing is ever re-sent.
+ */
+export interface ChannelPostResult {
+  mode: 'album' | 'individual';
+  sent: ChannelPostSentItem[];
+  text?: ChannelPostText;
+  failedAt?: number;
+  error?: string;
+}
+
 /**
  * A message read live from a channel by `channels.messages()`. This is the engine payload
  * (backend `ChannelMessage`), NOT the persisted {@link MessageRecord} — that endpoint reads

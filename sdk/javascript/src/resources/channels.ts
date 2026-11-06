@@ -8,15 +8,17 @@
 import { encodeSegment } from '../http.js';
 import type { OpenWAClient } from '../client.js';
 import type {
+  ChannelMessageQuery,
+  ChannelMessageRecord,
+  ChannelPostResult,
+  ChannelRecord,
   CreateChannelRequest,
   DemoteChannelAdminRequest,
   MuteChannelRequest,
-  TransferChannelOwnershipRequest,
-  ChannelMessageQuery,
-  ChannelMessageRecord,
-  ChannelRecord,
+  PostChannelImagesRequest,
   SubscribeChannelRequest,
   SuccessResult,
+  TransferChannelOwnershipRequest,
 } from '../types.js';
 
 export class ChannelsResource {
@@ -54,6 +56,28 @@ export class ChannelsResource {
       path: `/api/sessions/${encodeSegment(sessionId)}/channels`,
       body,
     });
+  }
+
+  /**
+   * Post 1-10 images to a channel the session owns or administers, one post per image in order, plus
+   * an optional text post before or after them. Live progress arrives on the socket as
+   * `channel.post.progress`, correlated by `body.postId`. Nothing is re-sent: a failure after something
+   * went out answers with `failedAt` set. Pass `idempotencyKey` to make a retry replay that answer.
+   */
+  postImages(
+    sessionId: string,
+    channelId: string,
+    body: PostChannelImagesRequest,
+    idempotencyKey?: string,
+  ): Promise<ChannelPostResult> {
+    return this.client.request<ChannelPostResult>(
+      {
+        method: 'POST',
+        path: `/api/sessions/${encodeSegment(sessionId)}/channels/${encodeSegment(channelId)}/posts/images`,
+        body,
+      },
+      idempotencyKey,
+    );
   }
 
   /**

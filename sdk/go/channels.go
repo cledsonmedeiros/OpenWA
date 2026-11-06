@@ -44,6 +44,19 @@ func (s *ChannelsService) Create(ctx context.Context, sessionID string, body Cre
 	return &out, nil
 }
 
+// PostImages posts 1-10 images to a channel the session owns or administers, one post per image in
+// order, plus an optional text post. Progress arrives on the socket as channel.post.progress. Nothing is
+// re-sent: a failure after something went out answers with FailedAt set. A key set with
+// WithIdempotencyKey makes a retry replay that answer.
+func (s *ChannelsService) PostImages(ctx context.Context, sessionID, channelID string, body PostChannelImagesRequest) (*ChannelPostResult, error) {
+	var out ChannelPostResult
+	err := s.client.do(ctx, "POST", s.base(sessionID)+"/"+pathEscape(channelID)+"/posts/images", nil, body, &out)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // Delete destroys a channel this account owns. Irreversible, and every subscriber loses it.
 //
 // Note the path: Unsubscribe is the DELETE route, and the two are deliberately not reachable by the

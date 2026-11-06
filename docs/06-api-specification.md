@@ -3949,7 +3949,9 @@ List all channels/newsletters the session is subscribed to.
     "description": "Release notes and tips",
     "inviteCode": "ABC123xyz",
     "subscriberCount": 1042,
-    "verified": true
+    "verified": true,
+    "role": "owner",
+    "mediaSupported": true
   }
 ]
 ```
@@ -4051,6 +4053,40 @@ engine can delete a channel it does not own.
 `https://whatsapp.com/channel/…` link — the code is what `POST /channels/subscribe` takes).
 
 **Errors:** `400` validation, or session not started · `401` · `403` the engine refused (on whatsapp-web.js this includes channel creation being disabled for the account) · `409` conflict or engine not ready (retryable) · `503` WhatsApp rate-limited the create on Baileys (code 429; nothing was created, so a retry is safe; a create WhatsApp timed out, code 408, answers `500` instead, as it may have succeeded: check before retrying)
+
+#### POST /api/sessions/:sessionId/channels/:channelId/posts/images
+
+Post an ordered batch of 1–10 images to a channel the session owns or administers, one post per image
+in the order given, plus an optional text post before or after them. whatsapp-web.js only, and only
+while the channel reports `mediaSupported: true`.
+
+**Auth:** API key (OPERATOR) · **Scope:** session-scoped; a key restricted to specific chats gets `403`
+
+**Headers:** `Idempotency-Key` (optional) — same contract as the message send routes.
+
+**Request body** — `PostChannelImagesDto`
+
+| Field          | Type    | Required | Constraints         | Description                                                        |
+| -------------- | ------- | -------- | ------------------- | ------------------------------------------------------------------ |
+| `postId`       | string  | Yes      | UUID                | Caller-generated id correlating the `channel.post.progress` frames |
+| `images`       | array   | Yes      | 1–10 items          | Each `{ url }` or `{ base64, mimetype }` (an `image/*` type)       |
+| `text`         | string  | No       | ≤ 4096 chars        | Posted as its own message                                          |
+| `textPosition` | string  | No       | `before` \| `after` | Where the text goes; default `after`                               |
+| `linkPreview`  | boolean | No       | —                   | Same meaning as on `send-text`                                     |
+
+Every image is validated (one of `url`/`base64`, an `image/*` mimetype, the media size cap) before
+the first send. The sends then run one at a time through the regular message pipeline. Live progress
+is emitted on the socket as `channel.post.progress` (`{ postId, channelId, index, total, mode, status,
+messageId? }`, one frame per image and a closing `done`).
+
+**Response** `201` — `{ "mode": "individual", "sent": [{ "index": 0, "messageId": "…" }], "text": { "messageId": "…" } }`
+
+**Response** `207` — a send failed after something already went out. The batch stopped there and
+nothing is re-sent: `sent` lists what went out, `failedAt` the index of the image that failed (or the
+image count when only the trailing text failed) and `error` why. An `Idempotency-Key` retry replays
+this body with status `201`, so read `failedAt`, not the status, to tell a partial batch.
+
+**Errors:** `400` validation, or session not started (nothing was sent) · `401` · `403` a key restricted to specific chats · `404` channel not found · `409` conflict or engine not ready (retryable), or an idempotency key still in progress or with an unknown outcome · `422` idempotency key reused with a different body · `501` the engine cannot send images to this channel (nothing was sent)
 
 #### POST /api/sessions/:sessionId/channels/:channelId/delete
 

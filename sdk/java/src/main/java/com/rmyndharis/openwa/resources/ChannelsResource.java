@@ -6,10 +6,12 @@ import com.rmyndharis.openwa.OpenWAClient;
 import com.rmyndharis.openwa.http.HttpMethod;
 import com.rmyndharis.openwa.model.ChannelMessageQuery;
 import com.rmyndharis.openwa.model.ChannelMessageRecord;
+import com.rmyndharis.openwa.model.ChannelPostResult;
 import com.rmyndharis.openwa.model.ChannelRecord;
 import com.rmyndharis.openwa.model.CreateChannelRequest;
 import com.rmyndharis.openwa.model.DemoteChannelAdminRequest;
 import com.rmyndharis.openwa.model.MuteChannelRequest;
+import com.rmyndharis.openwa.model.PostChannelImagesRequest;
 import com.rmyndharis.openwa.model.TransferChannelOwnershipRequest;
 import com.rmyndharis.openwa.model.SubscribeChannelRequest;
 import com.rmyndharis.openwa.model.SuccessResult;
@@ -54,6 +56,28 @@ public final class ChannelsResource {
             query,
             null,
             ChannelMessageRecord.class);
+    }
+
+    /** Post an ordered image batch to a channel. See {@link #postImages(String, String, PostChannelImagesRequest, String)}. */
+    public ChannelPostResult postImages(String sessionId, String channelId, PostChannelImagesRequest body) {
+        return postImages(sessionId, channelId, body, null);
+    }
+
+    /**
+     * Post 1-10 images to a channel the session owns or administers, one post per image in order, plus an
+     * optional text post. Progress arrives on the socket as {@code channel.post.progress}. Nothing is re-sent:
+     * a failure after something went out answers with {@code failedAt} set; an idempotency key makes a retry
+     * replay that answer.
+     */
+    public ChannelPostResult postImages(
+        String sessionId, String channelId, PostChannelImagesRequest body, String idempotencyKey) {
+        return client.request(
+            HttpMethod.POST,
+            "/api/sessions/" + encodeSegment(sessionId) + "/channels/" + encodeSegment(channelId) + "/posts/images",
+            null,
+            body,
+            ChannelPostResult.class,
+            idempotencyKey);
     }
 
     /** Create a channel. The account owns it, which is what makes {@link #delete} possible later. */

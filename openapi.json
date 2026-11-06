@@ -13929,6 +13929,147 @@
         ]
       }
     },
+    "/api/sessions/{sessionId}/channels/{channelId}/posts/images": {
+      "post": {
+        "description": "Posts 1 to 10 images to a channel the session owns or administers, one post per image in the order given, plus an optional text post before or after them. Each send goes through the regular message pipeline. Live progress is emitted on the socket as `channel.post.progress`, correlated by `postId`. Nothing is ever re-sent: when a send fails after something already went out the batch stops and answers 207 with what was sent, so an `Idempotency-Key` retry replays that answer. A replay is answered 201 with the stored body: `failedAt` in the body, not the status, marks a partial batch.",
+        "operationId": "ChannelController_postImages",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "channelId",
+            "required": true,
+            "in": "path",
+            "description": "Channel ID (`<id>@newsletter`)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Optional. Makes the send safe to retry: within 24 hours, a retry with the same key and body replays the first response (marked `Idempotent-Replayed: true`) instead of sending again. 1-255 visible ASCII characters, unique per session. While the first request runs a retry gets 409 `IDEMPOTENCY_KEY_IN_PROGRESS`; after a failure that may have sent the message it gets 409 `IDEMPOTENCY_OUTCOME_UNKNOWN`. A 4xx or 501 refusal before the engine call frees the key. Errors from an engine send keep it taken whatever their HTTP status, including 409, unless the engine proves that nothing was sent: a transport failure before the message was handed over, a WhatsApp rate limit, media it could not fetch, or, on Baileys, a sticker or preview image it could not read, a recipient WhatsApp reports as not registered, a quoted or forwarded message it does not hold or holds under another chat, or a connection replaced before the message was written.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PostChannelImagesDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Every post went out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelPostResultDto"
+                }
+              }
+            }
+          },
+          "207": {
+            "description": "Some posts went out and then a send failed; `failedAt` names where the batch stopped",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelPostResultDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed for the batch; nothing was sent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, unknown, revoked, or expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A key restricted to specific chats cannot post to channels. Also returned when the API key's role, session or chat scope, or IP allow-list does not allow this operation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such channel — the id is not among the session's subscribed channels, either because it is wrong or because the channel has not synced into the local collection yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The session is not connected: an engine exists for it but is not `ready`, meaning disconnected, reconnecting, or still initializing, so the request never reached WhatsApp. Wait for `ready` and retry. A session that was never started answers `400` instead, and the session lifecycle routes answer `409` for a conflicting state rather than this. One window answers this while the session still reads `ready`: WhatsApp Web periodically reloads its own page and the engine re-injects into it, and for those few seconds the answer is a `409` naming the reload; retry shortly.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`IDEMPOTENCY_KEY_REUSED`: the Idempotency-Key was already used with a different route or body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "The engine cannot send images to this channel (`mediaSupported` is not true); nothing was sent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Post an ordered batch of images to a channel",
+        "tags": [
+          "channels"
+        ]
+      }
+    },
     "/api/sessions/{sessionId}/channels/{channelId}/delete": {
       "post": {
         "description": "Irreversible, and every subscriber loses the channel. Deliberately NOT `DELETE /channels/:channelId` — that route unsubscribes, and the two must not be reachable by the same request with a slip of the wrist. Only the owner can delete.",
@@ -24547,6 +24688,141 @@
         },
         "required": [
           "name"
+        ]
+      },
+      "ChannelImageDto": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Media URL (http/https)",
+            "example": "https://example.com/image.jpg"
+          },
+          "base64": {
+            "type": "string",
+            "description": "Base64 encoded media data"
+          },
+          "mimetype": {
+            "type": "string",
+            "description": "Media MIME type (required when using base64)",
+            "example": "image/jpeg"
+          }
+        }
+      },
+      "PostChannelImagesDto": {
+        "type": "object",
+        "properties": {
+          "postId": {
+            "type": "string",
+            "description": "Caller-generated UUID for this batch. Correlates the `channel.post.progress` socket frames with this request; it is not an idempotency key (send `Idempotency-Key` for that).",
+            "example": "3f9a1c2e-5b6d-4e7f-8a9b-0c1d2e3f4a5b"
+          },
+          "images": {
+            "minItems": 1,
+            "maxItems": 10,
+            "description": "Images in the order they are posted. Each one is its own channel post.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChannelImageDto"
+            }
+          },
+          "text": {
+            "type": "string",
+            "description": "Optional text, posted as its own message before or after the images.",
+            "maxLength": 4096
+          },
+          "textPosition": {
+            "type": "string",
+            "enum": [
+              "before",
+              "after"
+            ],
+            "default": "after",
+            "description": "Where the text goes."
+          },
+          "linkPreview": {
+            "type": "boolean",
+            "description": "Link preview for the text post, with the same meaning as `send-text`.",
+            "example": false
+          }
+        },
+        "required": [
+          "postId",
+          "images"
+        ]
+      },
+      "ChannelPostSentItemDto": {
+        "type": "object",
+        "properties": {
+          "index": {
+            "type": "number",
+            "description": "Position of the image in the request.",
+            "example": 0
+          },
+          "messageId": {
+            "type": "string",
+            "description": "Message id of the post.",
+            "example": "true_120363@newsletter_3EB0A1"
+          }
+        },
+        "required": [
+          "index",
+          "messageId"
+        ]
+      },
+      "ChannelPostTextDto": {
+        "type": "object",
+        "properties": {
+          "messageId": {
+            "type": "string",
+            "description": "Message id of the text post.",
+            "example": "true_120363@newsletter_3EB0B2"
+          }
+        },
+        "required": [
+          "messageId"
+        ]
+      },
+      "ChannelPostResultDto": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "album",
+              "individual"
+            ],
+            "description": "How the images went out. Always `individual` today: a channel album is not sendable yet.",
+            "example": "individual"
+          },
+          "sent": {
+            "description": "The images that went out, in order.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChannelPostSentItemDto"
+            }
+          },
+          "text": {
+            "description": "The text post, when one was sent.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ChannelPostTextDto"
+              }
+            ]
+          },
+          "failedAt": {
+            "type": "number",
+            "description": "On 207: index of the image that failed, or the image count when only the trailing text failed.",
+            "example": 2
+          },
+          "error": {
+            "type": "string",
+            "description": "On 207: why the batch stopped."
+          }
+        },
+        "required": [
+          "mode",
+          "sent"
         ]
       },
       "ChannelAckResponseDto": {

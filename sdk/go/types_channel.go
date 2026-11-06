@@ -25,6 +25,60 @@ type ChannelRecord struct {
 	MediaSupported *bool `json:"mediaSupported,omitempty"`
 }
 
+// ChannelImageInput is one image of a channel batch: URL, or Base64 with its Mimetype (image/*).
+type ChannelImageInput struct {
+	URL      *string `json:"url,omitempty"`
+	Base64   *string `json:"base64,omitempty"`
+	Mimetype *string `json:"mimetype,omitempty"`
+}
+
+// ChannelTextPosition is where the text post of a channel batch goes.
+type ChannelTextPosition string
+
+const (
+	ChannelTextBefore ChannelTextPosition = "before"
+	ChannelTextAfter  ChannelTextPosition = "after"
+)
+
+// PostChannelImagesRequest is the body of Channels.PostImages: 1-10 images posted in order, plus an
+// optional text post. PostID is a caller-generated UUID correlating the channel.post.progress frames.
+type PostChannelImagesRequest struct {
+	PostID       string               `json:"postId"`
+	Images       []ChannelImageInput  `json:"images"`
+	Text         *string              `json:"text,omitempty"`
+	TextPosition *ChannelTextPosition `json:"textPosition,omitempty"`
+	LinkPreview  *bool                `json:"linkPreview,omitempty"`
+}
+
+// ChannelPostMode is how a channel batch went out.
+type ChannelPostMode string
+
+const (
+	ChannelPostAlbum      ChannelPostMode = "album"
+	ChannelPostIndividual ChannelPostMode = "individual"
+)
+
+// ChannelPostSentItem is one image of a batch that went out.
+type ChannelPostSentItem struct {
+	Index     int    `json:"index"`
+	MessageID string `json:"messageId"`
+}
+
+// ChannelPostText is the text post of a batch.
+type ChannelPostText struct {
+	MessageID string `json:"messageId"`
+}
+
+// ChannelPostResult is the answer of Channels.PostImages. A non-nil FailedAt means the batch stopped
+// there after something went out; nothing is re-sent.
+type ChannelPostResult struct {
+	Mode     ChannelPostMode       `json:"mode"`
+	Sent     []ChannelPostSentItem `json:"sent"`
+	Text     *ChannelPostText      `json:"text,omitempty"`
+	FailedAt *int                  `json:"failedAt,omitempty"`
+	Error    *string               `json:"error,omitempty"`
+}
+
 // ChannelRole is the session account's role in a channel.
 type ChannelRole string
 
