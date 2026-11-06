@@ -503,6 +503,9 @@ export interface StatusResult {
 }
 
 // Phase 3: Channels/Newsletter
+/** The session account's role in a channel. `unknown` covers any value the engine reports that is not mapped. */
+export type ChannelRole = 'owner' | 'admin' | 'subscriber' | 'unknown';
+
 export interface Channel {
   id: string;
   name: string;
@@ -512,6 +515,11 @@ export interface Channel {
   picture?: string;
   verified?: boolean;
   createdAt?: number;
+  /**
+   * The session account's role in the channel, when the engine reports one (whatsapp-web.js only).
+   * A UX signal: the server and WhatsApp still decide whether a send is accepted.
+   */
+  role?: ChannelRole;
 }
 
 export interface ChannelMessage {

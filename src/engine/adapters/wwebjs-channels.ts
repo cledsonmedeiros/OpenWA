@@ -5,6 +5,7 @@ import { EngineNotSupportedError } from '../../common/errors/engine-not-supporte
 import { EngineRefusedError } from '../../common/errors/engine-refused.error';
 import { ChannelNotFoundError } from '../../common/errors/channel-not-found.error';
 import { type WwebjsEngineHost, withPage, reportPageDeath } from './wwebjs-host';
+import { mapMembershipType } from './wwebjs-channel-role';
 
 /**
  * Channel/Newsletter operations extracted from WhatsAppWebJsAdapter. The adapter keeps the public
@@ -41,6 +42,7 @@ export class WwebjsChannels {
       inviteCode: ch.inviteCode ? String(ch.inviteCode) : undefined,
       subscriberCount: ch.subscriberCount ? Number(ch.subscriberCount) : undefined,
       verified: ch.verified ? Boolean(ch.verified) : undefined,
+      role: mapMembershipType(ch.channelMetadata?.membershipType),
     }));
   }
 

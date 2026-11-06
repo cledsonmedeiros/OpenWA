@@ -9729,6 +9729,17 @@ describe('WhatsAppWebJsAdapter raw-id extraction hardening', () => {
     expect(result[0].id).toBe('120363@newsletter');
   });
 
+  it('getSubscribedChannels maps channelMetadata.membershipType to role', async () => {
+    const getChannels = jest.fn().mockResolvedValue([
+      { id: { _serialized: 'a@newsletter' }, name: 'A', channelMetadata: { membershipType: 'owner' } },
+      { id: { _serialized: 'b@newsletter' }, name: 'B' },
+    ]);
+
+    const result = await readyAdapter({ getChannels }).getSubscribedChannels();
+
+    expect(result.map(c => c.role)).toEqual(['owner', 'unknown']);
+  });
+
   it('createChannel reads nid.$1 on a renamed build instead of returning id "undefined"', async () => {
     const createChannel = jest.fn().mockResolvedValue({ title: 'C', nid: { $1: '120363@newsletter' } });
 

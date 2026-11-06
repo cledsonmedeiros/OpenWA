@@ -172,6 +172,11 @@ export interface WwjsChannelData {
   inviteCode?: string;
   subscriberCount?: number;
   verified?: boolean;
+  /**
+   * `newsletterMetadata.serialize()`, assigned by whatsapp-web.js 1.34.7 `Channel._patch`. Only
+   * `membershipType` is read (verified live as `"owner"`); typed `unknown` because WA Web owns it.
+   */
+  channelMetadata?: { membershipType?: unknown };
   fetchMessages(opts: { limit: number }): Promise<WwjsChannelMessage[]>;
 }
 
