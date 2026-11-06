@@ -1386,6 +1386,8 @@ class ChannelRecord(TypedDict):
     createdAt: NotRequired[int]
     # Reported by whatsapp-web.js; absent on Baileys. A UX signal only.
     role: NotRequired[ChannelRole]
+    # Whether an image can be sent to the channel (whatsapp-web.js with the channel media patch).
+    mediaSupported: NotRequired[bool]
 
 
 # A message read live from a channel by ``channels.messages()`` — the engine payload

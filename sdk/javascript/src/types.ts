@@ -1388,6 +1388,8 @@ export interface ChannelRecord {
    * signal only — the server and WhatsApp still decide whether a send is accepted.
    */
   role?: 'owner' | 'admin' | 'subscriber' | 'unknown';
+  /** Whether an image can be sent to the channel (whatsapp-web.js with the channel media patch). */
+  mediaSupported?: boolean;
 }
 
 /**

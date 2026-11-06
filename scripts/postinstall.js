@@ -32,6 +32,8 @@
  *  10. `node scripts/patch-wwebjs-send-error.js --best-effort` when present, making a failed send
  *      report what the page threw instead of `t: t`, gated the same way. It runs after the other
  *      two Client.js patchers (steps 2 and 5), so theirs still meet the tree they were written for.
+ *  10a. `node scripts/patch-wwebjs-channel-media.js --best-effort` when present, routing channel media
+ *      sends through WA Web's own newsletter media action (msg.avParams is gone), gated the same way.
  *  11. `node scripts/patch-baileys-appstate.js --best-effort` when present, the app-state resync
  *      bound, gated the same way.
  *  12. `node scripts/patch-baileys-newsletter-create.js --best-effort` when present, the
@@ -165,6 +167,15 @@ function planSteps(root, env = process.env) {
       name: 'whatsapp-web.js send error capture (scripts/patch-wwebjs-send-error.js --best-effort)',
       command: process.execPath,
       args: [sendErrorPatcher, '--best-effort'],
+      options: { stdio: 'inherit', cwd: root, env: cleanEnv },
+    });
+  }
+  const channelMediaPatcher = path.join(root, 'scripts', 'patch-wwebjs-channel-media.js');
+  if (fs.existsSync(channelMediaPatcher)) {
+    steps.push({
+      name: 'whatsapp-web.js channel media send (scripts/patch-wwebjs-channel-media.js --best-effort)',
+      command: process.execPath,
+      args: [channelMediaPatcher, '--best-effort'],
       options: { stdio: 'inherit', cwd: root, env: cleanEnv },
     });
   }

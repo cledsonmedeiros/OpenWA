@@ -520,6 +520,11 @@ export interface Channel {
    * A UX signal: the server and WhatsApp still decide whether a send is accepted.
    */
   role?: ChannelRole;
+  /**
+   * Whether an image can be sent to this channel. whatsapp-web.js answers true once
+   * scripts/patch-wwebjs-channel-media.js is applied; absent on Baileys.
+   */
+  mediaSupported?: boolean;
 }
 
 export interface ChannelMessage {

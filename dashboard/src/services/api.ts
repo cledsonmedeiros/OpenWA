@@ -415,6 +415,8 @@ export interface Channel {
   subscriberCount?: number;
   /** The session account's role (whatsapp-web.js only); decides whether the post bar is shown. */
   role?: 'owner' | 'admin' | 'subscriber' | 'unknown';
+  /** Whether an image can be posted (whatsapp-web.js with the channel media patch). */
+  mediaSupported?: boolean;
   picture?: string;
   verified?: boolean;
   createdAt?: number;

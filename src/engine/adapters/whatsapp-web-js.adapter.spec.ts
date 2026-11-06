@@ -1,6 +1,7 @@
 import { Client, MessageMedia, WAState } from 'whatsapp-web.js';
 import { EventEmitter } from 'events';
 import { WhatsAppWebJsAdapter } from './whatsapp-web-js.adapter';
+import { isChannelMediaPatchApplied } from './wwebjs-channel-media-status';
 import { extractLinkedParentJID } from './wwebjs-groups';
 import {
   downloadMediaInPage,
@@ -81,6 +82,9 @@ jest.mock('undici', () => {
 // Deterministic QR encode: the real qrcode.toDataURL is an unmocked multi-ms macrotask, so timing-based
 // waits are flaky. Mocking it to resolve on the microtask queue lets the 'qr' handler settle within a
 // couple of awaited flushes. No existing wwebjs spec emits 'qr', so only the QR tests are affected.
+// Whether scripts/patch-wwebjs-channel-media.js is applied gates images to a channel. The local
+// node_modules may or may not carry it, so the suite pins it: off by default, on where a test says so.
+jest.mock('./wwebjs-channel-media-status', () => ({ isChannelMediaPatchApplied: jest.fn(() => false) }));
 jest.mock('qrcode', () => ({
   __esModule: true,
   toDataURL: jest.fn(() => Promise.resolve('data:image/png;base64,FAKEQR')),
@@ -1645,6 +1649,43 @@ describe('WhatsAppWebJsAdapter channel-JID guard (#554 — wwebjs Channel lacks 
       expect(err).toBeInstanceOf(ChannelMediaNotSupportedError);
       expect((err as ChannelMediaNotSupportedError).getStatus()).toBe(501);
       expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    describe('with scripts/patch-wwebjs-channel-media.js applied', () => {
+      beforeEach(() => jest.mocked(isChannelMediaPatchApplied).mockReturnValue(true));
+      afterEach(() => jest.mocked(isChannelMediaPatchApplied).mockReturnValue(false));
+
+      it('sends an image to a channel', async () => {
+        const sendMessage = jest.fn().mockResolvedValue({ id: { _serialized: 'M1' }, timestamp: 1 });
+        await expect(
+          readyAdapter({ sendMessage }).sendImageMessage(NEWSLETTER, {
+            mimetype: 'image/jpeg',
+            data: Buffer.from([1]).toString('base64'),
+          }),
+        ).resolves.toMatchObject({ id: 'M1' });
+        expect(sendMessage).toHaveBeenCalledWith(NEWSLETTER, expect.anything(), expect.anything());
+      });
+
+      it('still refuses a video to a channel: only images are routed through the patch', async () => {
+        const sendMessage = jest.fn();
+        const err = await readyAdapter({ sendMessage })
+          .sendVideoMessage(NEWSLETTER, { mimetype: 'video/mp4', data: Buffer.from([1]).toString('base64') })
+          .catch((e: unknown) => e);
+        expect(err).toBeInstanceOf(ChannelMediaNotSupportedError);
+        expect(sendMessage).not.toHaveBeenCalled();
+      });
+
+      it('reports mediaSupported on each channel', async () => {
+        const getChannels = jest.fn().mockResolvedValue([{ id: { _serialized: 'a@newsletter' }, name: 'A' }]);
+        const [channel] = await readyAdapter({ getChannels }).getSubscribedChannels();
+        expect(channel.mediaSupported).toBe(true);
+      });
+    });
+
+    it('reports mediaSupported false while the patch is not applied', async () => {
+      const getChannels = jest.fn().mockResolvedValue([{ id: { _serialized: 'a@newsletter' }, name: 'A' }]);
+      const [channel] = await readyAdapter({ getChannels }).getSubscribedChannels();
+      expect(channel.mediaSupported).toBe(false);
     });
 
     it('still sends media on a user JID', async () => {

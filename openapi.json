@@ -24482,6 +24482,11 @@
             ],
             "description": "The session account's role in the channel, when the engine reports one (whatsapp-web.js). A UX signal — the server and WhatsApp still decide whether a send is accepted. Absent on Baileys.",
             "example": "owner"
+          },
+          "mediaSupported": {
+            "type": "boolean",
+            "description": "Whether an image can be sent to this channel. True on whatsapp-web.js once the channel media patch is applied; other media kinds still answer 501. Absent on Baileys.",
+            "example": true
           }
         },
         "required": [

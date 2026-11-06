@@ -40,6 +40,7 @@ import { LidMappingStore } from '../identity/lid-mapping-store.service';
 import { createLogger } from '../../common/services/logger.service';
 import { EngineNotReadyError } from '../../common/errors/engine-not-ready.error';
 import { ChannelMediaNotSupportedError } from '../../common/errors/channel-media-not-supported.error';
+import { type ChannelMediaKind, isChannelMediaPatchApplied } from './wwebjs-channel-media-status';
 import { WwebjsGroups } from './wwebjs-groups';
 import { type WwebjsEngineHost } from './wwebjs-host';
 import { registerWwebjsMessageEvents } from './wwebjs-message-events';
@@ -186,7 +187,7 @@ export class WhatsAppWebJsAdapter implements IWhatsAppEngine {
       isPageTransportError: error => this.isPageTransportError(error),
       reportIfPageTransportError: (error, context) => this.reportIfPageTransportError(error, context),
       reportOnceGone: (error, context) => this.lifecycle.reportOnceGone(error, context),
-      ensureNotChannelRecipient: chatId => this.ensureNotChannelRecipient(chatId),
+      ensureNotChannelRecipient: (chatId, kind) => this.ensureNotChannelRecipient(chatId, kind),
       // The raw answer, `@lid` included: the send resolver addresses a migrated contact by it, while the
       // public getNumberId reports the neutral phone id.
       getNumberId: number => this.contacts.lookupNumberId(number),
@@ -971,11 +972,12 @@ export class WhatsAppWebJsAdapter implements IWhatsAppEngine {
     }
   }
 
-  private ensureNotChannelRecipient(chatId: string): void {
+  private ensureNotChannelRecipient(chatId: string, kind: ChannelMediaKind): void {
     // whatsapp-web.js crashes building a channel media message (`msg.avParams is not a function`,
-    // upstream wwebjs#201823 — WA Web removed Msg.avParams). Text→channel works; media does not.
-    // Fail fast with a typed 501 instead of surfacing the raw TypeError as a 500 (#673).
-    if (isChannelJid(chatId)) {
+    // upstream wwebjs#201823 — WA Web removed Msg.avParams). scripts/patch-wwebjs-channel-media.js
+    // routes it through WA Web's own newsletter media action, verified live for images only, so an
+    // image passes when the patch is applied and every other kind keeps the typed 501 (#673).
+    if (isChannelJid(chatId) && !(kind === 'image' && isChannelMediaPatchApplied())) {
       throw new ChannelMediaNotSupportedError();
     }
   }

@@ -45,6 +45,14 @@ export class ChannelDto {
     example: 'owner',
   })
   role?: 'owner' | 'admin' | 'subscriber' | 'unknown';
+
+  @ApiPropertyOptional({
+    description:
+      'Whether an image can be sent to this channel. True on whatsapp-web.js once the channel media patch ' +
+      'is applied; other media kinds still answer 501. Absent on Baileys.',
+    example: true,
+  })
+  mediaSupported?: boolean;
 }
 
 export class ChannelMessageDto {

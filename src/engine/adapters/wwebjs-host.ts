@@ -5,6 +5,7 @@ import {
   type IncomingMessage,
 } from '../interfaces/whatsapp-engine.interface';
 import { type createLogger } from '../../common/services/logger.service';
+import { type ChannelMediaKind } from './wwebjs-channel-media-status';
 import { EngineNotReadyError } from '../../common/errors/engine-not-ready.error';
 import { EngineTransportError } from '../../common/errors/engine-transport.error';
 import { type WhatsAppWebJsConfig } from './whatsapp-web-js.adapter';
@@ -30,7 +31,8 @@ export interface WwebjsEngineHost {
    * without it keeps the text-free behaviour of simply carrying on.
    */
   reportOnceGone?(error: unknown, context: string): Promise<void>;
-  ensureNotChannelRecipient(chatId: string): void;
+  /** `kind` is the media being sent; only an image passes, and only with the channel media patch. */
+  ensureNotChannelRecipient(chatId: string, kind: ChannelMediaKind): void;
   getNumberId(number: string): Promise<string | null>;
   capInboundMediaFor(
     msg: Message,

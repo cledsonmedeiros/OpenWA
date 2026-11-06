@@ -32,6 +32,7 @@ import { RecipientUnreachableError } from '../../common/errors/recipient-unreach
 import { EngineNotReadyError } from '../../common/errors/engine-not-ready.error';
 import { RecipientLookupUnansweredError } from '../../common/errors/engine-page.error';
 import { type WwebjsEngineHost, requireClient, withPage } from './wwebjs-host';
+import { type ChannelMediaKind } from './wwebjs-channel-media-status';
 import { toCapturedPageError } from './wwebjs-lifecycle';
 
 /**
@@ -628,15 +629,21 @@ export class WwebjsMessaging {
   }
 
   async sendImageMessage(chatId: string, media: MediaInput): Promise<MessageResult> {
-    return this.sendMediaMessage(chatId, media, undefined, 'image/jpeg');
+    return this.sendMediaMessage(chatId, media, 'image', undefined, 'image/jpeg');
   }
 
   async sendVideoMessage(chatId: string, media: MediaInput): Promise<MessageResult> {
-    return this.sendMediaMessage(chatId, media, undefined, 'video/mp4');
+    return this.sendMediaMessage(chatId, media, 'video', undefined, 'video/mp4');
   }
 
   async sendAudioMessage(chatId: string, media: MediaInput): Promise<MessageResult> {
-    return this.sendMediaMessage(chatId, media, media.ptt ? { sendAudioAsVoice: true } : undefined, 'audio/mpeg');
+    return this.sendMediaMessage(
+      chatId,
+      media,
+      'audio',
+      media.ptt ? { sendAudioAsVoice: true } : undefined,
+      'audio/mpeg',
+    );
   }
 
   /**
@@ -654,17 +661,18 @@ export class WwebjsMessaging {
   async sendDocumentMessage(chatId: string, media: MediaInput): Promise<MessageResult> {
     const kind = chatKind(chatId);
     const asDocument = kind !== 'status' && kind !== 'broadcast';
-    return this.sendMediaMessage(chatId, media, asDocument ? { sendMediaAsDocument: true } : undefined);
+    return this.sendMediaMessage(chatId, media, 'document', asDocument ? { sendMediaAsDocument: true } : undefined);
   }
 
   private async sendMediaMessage(
     chatId: string,
     media: MediaInput,
+    kind: ChannelMediaKind,
     extraOptions?: { sendAudioAsVoice?: boolean; sendMediaAsDocument?: boolean },
     fallbackType?: string,
   ): Promise<MessageResult> {
     this.host.ensureReady();
-    this.host.ensureNotChannelRecipient(chatId);
+    this.host.ensureNotChannelRecipient(chatId, kind);
 
     // Build the media once (a remote URL is fetched here); sendResolved may retry the send itself.
     const messageMedia = await toMessageMedia(media, this.host.config.proxy?.url, { fallbackType });
@@ -733,7 +741,7 @@ export class WwebjsMessaging {
     // Sticker has its own send path (sendMediaAsSticker), not the sendMediaMessage funnel, but it
     // hits the same channel crash: for a channel wwjs drops the sticker form and runs processMediaData
     // with sendToChannel, which still ends at msg.avParams() (Utils.js:518). Guard it too (#673).
-    this.host.ensureNotChannelRecipient(chatId);
+    this.host.ensureNotChannelRecipient(chatId, 'sticker');
     ensureSendable(chatId, 'sticker');
     // Keep the fetched content-type for a remote URL: here the mimetype selects the conversion, and
     // whatsapp-web.js returns the media unconverted once it reads as webp (Util.formatImageToWebpSticker).

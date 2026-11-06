@@ -20,6 +20,9 @@ type ChannelRecord struct {
 	// Role is the session account's role in the channel. Reported by whatsapp-web.js; nil on
 	// Baileys. A UX signal only — the server and WhatsApp still decide whether a send is accepted.
 	Role *ChannelRole `json:"role,omitempty"`
+	// MediaSupported reports whether an image can be sent to the channel (whatsapp-web.js with the
+	// channel media patch); nil on Baileys.
+	MediaSupported *bool `json:"mediaSupported,omitempty"`
 }
 
 // ChannelRole is the session account's role in a channel.
