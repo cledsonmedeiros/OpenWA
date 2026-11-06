@@ -2916,11 +2916,19 @@
   display: flex;
   align-items: center;
   gap: 0.375rem;
-  flex-shrink: 0;
+  /* Shrinks before the send button does: at phone width a long label (fr, hi, te) would otherwise
+     push send off the row, the overflow the composer pill's own min-width comment describes. */
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 40%;
   font-size: 0.8125rem;
+  line-height: 1.2;
   color: var(--text-secondary);
   cursor: pointer;
-  white-space: nowrap;
+}
+
+.chats-page .channel-link-preview-toggle input {
+  flex-shrink: 0;
 }
 
 .chats-page .btn-input-accessory {

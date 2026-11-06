@@ -57,6 +57,8 @@ let engineType = 'baileys';
 // The subscribed channels, the posts every channel's feed answers with, and the stored statuses.
 let channels: Channel[] = [];
 let channelPosts: ChannelMessage[] = [];
+// When set, send-text answers 500, as WhatsApp refusing a post to a channel the session lost rights to.
+let sendTextFails = false;
 let statuses: StatusUpdate[] = [];
 
 // Answers a session's chat list in place of the fixture, keyed by the session id in the URL (before
@@ -372,6 +374,7 @@ function installFetchStub(): void {
       return Promise.resolve(jsonResponse({ success: true }));
     }
     if (method === 'POST' && path === `/api/sessions/${SESSION.id}/messages/send-text`) {
+      if (sendTextFails) return Promise.resolve(jsonResponse({ message: 'not an admin' }, 500));
       const send = () => jsonResponse({ messageId: sendTextId, timestamp: 1_700_000_100 });
       return sendGate ? sendGate.then(send) : Promise.resolve(send());
     }
@@ -468,6 +471,7 @@ afterEach(async () => {
   engineType = 'baileys';
   channels = [CHANNEL];
   channelPosts = [];
+  sendTextFails = false;
   statuses = [];
 });
 
@@ -2939,6 +2943,50 @@ test('a channel post with media and no URL says the media is unavailable', async
     return found;
   });
   assert.ok(within(bubble as HTMLElement).queryByText('Media unavailable'), 'the media post rendered empty');
+});
+
+// The role is a UX signal from the engine: only an owner or admin gets the post bar.
+test('the channel pane shows the post bar for an owned channel and not for a subscribed one', async () => {
+  const { screen, fireEvent, waitFor } = rtl;
+  engineType = 'whatsapp-web.js';
+  window.sessionStorage.setItem('openwa_engine_type', engineType);
+  channels = [
+    { id: '120363000000000001@newsletter', name: 'Mine', role: 'owner' },
+    { id: '120363000000000002@newsletter', name: 'Theirs', role: 'subscriber' },
+  ];
+  const { container } = renderChats();
+  await screen.findByText('Alice');
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Channels' }));
+  fireEvent.click(await screen.findByText('Mine'));
+  await waitFor(() => assert.ok(screen.getByPlaceholderText('Post to the channel…')));
+  fireEvent.click(screen.getByText('Theirs'));
+  await waitFor(() => assert.ok(container.querySelector('.channel-room')));
+  assert.equal(screen.queryByPlaceholderText('Post to the channel…'), null);
+});
+
+// The open pane follows the refetched list: a failed send refetches the channels, and a role the
+// session lost must take the post bar away instead of leaving it pinned to the click-time snapshot.
+test('a failed channel post that refetches a lost role removes the post bar', async () => {
+  const { screen, fireEvent, waitFor } = rtl;
+  engineType = 'whatsapp-web.js';
+  window.sessionStorage.setItem('openwa_engine_type', engineType);
+  channels = [{ id: '120363000000000001@newsletter', name: 'News', role: 'owner' }];
+  renderChats();
+  await screen.findByText('Alice');
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Channels' }));
+  fireEvent.click(await screen.findByText('News'));
+  const field = await screen.findByPlaceholderText('Post to the channel…');
+
+  channels = [{ id: '120363000000000001@newsletter', name: 'News', role: 'subscriber' }];
+  sendTextFails = true;
+  fireEvent.change(field, { target: { value: 'hello' } });
+  fireEvent.submit((field as HTMLInputElement).form!);
+
+  // Wait for the refusal to land first: the post settles before the pane is asserted on.
+  await waitFor(() => assert.ok(screen.getByText('Failed to send message')));
+  await waitFor(() => assert.equal(screen.queryByPlaceholderText('Post to the channel…'), null));
 });
 
 test('a channel post or status caption carrying mention delimiters renders them as nothing, not as a mention', async () => {

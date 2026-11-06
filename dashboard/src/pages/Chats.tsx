@@ -240,7 +240,10 @@ export function Chats() {
 
   // Selected chat & message history
   const [activeChat, setActiveChat] = useState<Chat | null>(null);
-  const [activeChannel, setActiveChannel] = useState<Channel | null>(null);
+  // Only the channel id is state, like activeStatusContactId below: the open channel is derived from
+  // channelsQuery at render, so a refetch (a failed post, window focus) flows its fresh `role` into the
+  // open pane instead of leaving the post bar pinned to the click-time snapshot.
+  const [activeChannelId, setActiveChannelId] = useState<string | null>(null);
   // Only the contact id is state — the open group is derived from groupedStatuses at render, so a
   // refetch (window focus, post-compose) flows straight into the open viewer instead of leaving it
   // pinned to the snapshot captured at click time. A group that disappears (all items expired)
@@ -268,7 +271,7 @@ export function Chats() {
   const switchTab = useCallback((tab: 'chats' | 'channels' | 'status') => {
     setActiveTab(tab);
     setActiveChat(null);
-    setActiveChannel(null);
+    setActiveChannelId(null);
     setActiveStatusContactId(null);
   }, []);
 
@@ -281,6 +284,10 @@ export function Chats() {
     queryFn: () => sessionApi.getSubscribedChannels(selectedSessionId!),
     enabled: Boolean(selectedSessionId) && channelsSupported && activeTab === 'channels',
   });
+  const activeChannel = activeChannelId
+    ? (channelsQuery.data?.find(c => c.id === activeChannelId) ?? null)
+    : null;
+  const selectChannel = useCallback((channel: Channel) => setActiveChannelId(channel.id), []);
   const channelMessages = useChannelMessages(selectedSessionId, activeChannel?.id ?? null);
 
   // Status tab: both engines expose stored status content, so this query isn't engine-gated (unlike
@@ -641,7 +648,7 @@ export function Chats() {
     // cleared all the same, with no list to load in its place.
     if (selectedSessionId) void loadChats(selectedSessionId);
     setActiveChat(null);
-    setActiveChannel(null);
+    setActiveChannelId(null);
     setActiveStatusContactId(null);
     // A staged attachment or reply belongs to a chat in the session being left, so it is dropped here
     // rather than carried across — the close/reopen round trip that preserves it is scoped to a
@@ -1400,7 +1407,7 @@ export function Chats() {
       }
       setActiveTab(chat.kind === 'status' ? 'status' : 'chats');
       setActiveChat(chat);
-      setActiveChannel(null);
+      setActiveChannelId(null);
       setActiveStatusContactId(null);
       pendingHitRef.current = {
         sessionId: pending.sessionId,
@@ -1604,7 +1611,7 @@ export function Chats() {
     const existing = chats.find(c => c.id === chat.id);
     if (!existing) setChats(prev => [chat, ...prev]);
     setActiveTab('chats');
-    setActiveChannel(null);
+    setActiveChannelId(null);
     setActiveStatusContactId(null);
     setActiveChat(existing ?? chat);
     setShowNewChat(false);
@@ -1906,7 +1913,7 @@ export function Chats() {
       if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
       if (document.querySelector('[role="dialog"], [role="menu"]')) return;
       if (activeStatusContactId !== null) setActiveStatusContactId(null);
-      else if (activeChannel) setActiveChannel(null);
+      else if (activeChannel) setActiveChannelId(null);
       else if (activeChat && showContactInfo) {
         setContactInfoFor('');
         contactToggleRef.current?.focus();
@@ -2063,7 +2070,7 @@ export function Chats() {
               query: channelsQuery,
               channels: filteredChannels,
               activeChannelId: activeChannel?.id,
-              onSelectChannel: setActiveChannel,
+              onSelectChannel: selectChannel,
             }}
             statusTab={{
               loading: statusesQuery.isLoading,
@@ -2220,7 +2227,7 @@ export function Chats() {
               // for a plain subscriber the pane stays read-only.
               <div key={activeChannel.id} className="channel-room">
                 <header className="chats-room-header">
-                  <button className="room-back" onClick={() => setActiveChannel(null)} aria-label={t('common.back')}>
+                  <button className="room-back" onClick={() => setActiveChannelId(null)} aria-label={t('common.back')}>
                     <ArrowLeft size={20} />
                   </button>
                   <Megaphone size={20} />
