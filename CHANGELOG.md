@@ -19,7 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add a warning log and a `phone_second_lid_reported` audit row, filed under the reporting session, when a session reports a privacy id the gateway did not hold, or held only outside its mapping cache, for a phone number the lid table already maps to another reported id.
 - Add a hint to the dashboard API Keys form that an `@lid` chat entry also admits the phone number mapped to it.
 - Add `role` (`owner`, `admin`, `subscriber` or `unknown`) to each channel on whatsapp-web.js, read from WhatsApp Web's membership type and absent on Baileys, also in the typed SDKs.
-- Add a post bar to the dashboard channel pane on whatsapp-web.js for channels the session owns or administers: text with the link preview on by default and a switch to turn it off, the attach button disabled with the engine's media limitation as its tooltip, and the post shown once the feed refreshes.
+- Add a post bar to the dashboard channel pane on whatsapp-web.js for channels the session owns or administers: text with the link preview on by default and a switch to turn it off, and the post shown once the feed refreshes.
+- Send images to channels on whatsapp-web.js: a new install-time patch (`scripts/patch-wwebjs-channel-media.js`) routes channel media through WhatsApp Web's own newsletter media action, since the page no longer has the `msg.avParams` the library read (wwebjs#201823). Only images pass; video, audio, documents and stickers to a channel still answer `501`. Each channel reports `mediaSupported`.
+- Add `POST /api/sessions/{sessionId}/channels/{channelId}/posts/images` to post 1 to 10 images to a channel in order, one post each, with an optional text post before or after them. Each send goes through the regular message pipeline, live progress is emitted on the socket as `channel.post.progress`, and a send that fails after something went out stops the batch with a `207` listing what was posted, never re-sending. `postImages` in all five SDKs.
+- Pick, reorder and post up to 10 images from the dashboard channel pane, compressed in the browser, with the text before or after them and a live "n of N" counter.
 
 ### Changed
 
