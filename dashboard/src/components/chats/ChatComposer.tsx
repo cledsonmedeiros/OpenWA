@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { Loader2, Plus, Send, Smile, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { messageApi, type Chat, type MessageType } from '../../services/api';
 import { type ChatMessageView } from '../../utils/chatMessages';
 import { chatTitle } from '../../utils/formatPhone';
@@ -11,6 +11,7 @@ import { useRole } from '../../hooks/useRole';
 import { useToast } from '../../hooks/useToast';
 import type { ScrollDirection } from '../../utils/scrollDecision';
 import { MEDIA_UPLOAD_MAX_BYTES } from '../../utils/mediaUpload';
+import ComposerInputBar from './ComposerInputBar';
 
 // Map an attachment MIME type to the neutral MessageType for the optimistic outgoing bubble, so the
 // placeholder matches what the backend will persist (e.g. a PDF is `document`, not `application`).
@@ -377,66 +378,27 @@ function ChatComposer({
 
       {/* Message input bar */}
       <footer className="room-input-footer">
-        <form onSubmit={handleSend} className="input-form">
+        <ComposerInputBar
+          value={messageInput}
+          onChange={setMessageInput}
+          onSubmit={handleSend}
+          placeholder={
+            canWrite
+              ? attachment && !attachmentIsAudio
+                ? t('chats.captionPlaceholder')
+                : t('chats.messagePlaceholder')
+              : t('chats.noPermission')
+          }
+          canWrite={canWrite}
+          sending={sending}
+          canSubmit={Boolean(messageInput.trim()) || Boolean(attachment)}
+          attach={{ onClick: triggerFileSelect, disabled: !canWrite || sending, title: t('chats.attachTitle') }}
+          emoji={{ onToggle: () => setShowEmojiPicker(!showEmojiPicker), active: showEmojiPicker }}
+          inputRef={textInputRef}
+          sendPressRef={sendPressRef}
+        >
           <input type="file" ref={fileInputRef} onChange={handleFileChange} style={{ display: 'none' }} />
-
-          <button
-            type="button"
-            onClick={triggerFileSelect}
-            disabled={!canWrite || sending}
-            className="btn-input-accessory"
-            title={t('chats.attachTitle')}
-            aria-label={t('chats.attachTitle')}
-          >
-            <Plus size={24} />
-          </button>
-
-          {/* The text field and the emoji toggle share one pill, as in WhatsApp. */}
-          <div className="message-input-pill">
-            <input
-              type="text"
-              placeholder={
-                canWrite
-                  ? attachment && !attachmentIsAudio
-                    ? t('chats.captionPlaceholder')
-                    : t('chats.messagePlaceholder')
-                  : t('chats.noPermission')
-              }
-              value={messageInput}
-              onChange={e => setMessageInput(e.target.value)}
-              // Never disabled by a send: it holds focus through it, and handleSend refuses a second send meanwhile.
-              disabled={!canWrite}
-              ref={textInputRef}
-              className="message-text-input"
-            />
-            <button
-              type="button"
-              onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-              disabled={!canWrite || sending}
-              className={`btn-input-accessory inside ${showEmojiPicker ? 'active' : ''}`}
-              title={t('chats.emojiTitle')}
-              aria-label={t('chats.emojiTitle')}
-            >
-              <Smile size={22} />
-            </button>
-          </div>
-
-          <button
-            type="submit"
-            disabled={!canWrite || (!messageInput.trim() && !attachment) || sending}
-            onPointerDown={e => {
-              sendPressRef.current = e.pointerType;
-            }}
-            onKeyDown={() => {
-              sendPressRef.current = '';
-            }}
-            className="btn-send-message"
-            aria-label={t('chats.send')}
-            title={t('chats.send')}
-          >
-            {sending ? <Loader2 className="animate-spin" size={22} /> : <Send size={20} strokeWidth={2.25} />}
-          </button>
-        </form>
+        </ComposerInputBar>
       </footer>
     </>
   );
