@@ -194,7 +194,10 @@
       "empty": "Henüz hiçbir kanala abone değilsiniz.",
       "notReady": "Oturum henüz hazır değil.",
       "subscribers": "{{count}} abone",
-      "subscribers_other": "{{count}} abone"
+      "subscribers_other": "{{count}} abone",
+      "attachUnsupported": "Kanallara medya gönderimi whatsapp-web.js motorunda desteklenmiyor.",
+      "linkPreview": "Bağlantı önizlemesi oluştur",
+      "postPlaceholder": "Kanala gönder…"
     },
     "errors": {
       "loadSessions": "Oturumlar yüklenemedi",

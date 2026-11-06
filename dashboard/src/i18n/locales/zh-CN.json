@@ -194,7 +194,10 @@
       "empty": "你尚未订阅任何频道。",
       "notReady": "会话尚未就绪。",
       "subscribers": "{{count}} 位订阅者",
-      "subscribers_other": "{{count}} 位订阅者"
+      "subscribers_other": "{{count}} 位订阅者",
+      "attachUnsupported": "whatsapp-web.js 引擎不支持向频道发送媒体。",
+      "linkPreview": "生成链接预览",
+      "postPlaceholder": "发布到频道…"
     },
     "errors": {
       "loadSessions": "加载会话失败",

@@ -194,7 +194,10 @@
       "empty": "아직 구독 중인 채널이 없습니다.",
       "notReady": "세션이 아직 준비되지 않았습니다.",
       "subscribers": "구독자 {{count}}명",
-      "subscribers_other": "구독자 {{count}}명"
+      "subscribers_other": "구독자 {{count}}명",
+      "attachUnsupported": "whatsapp-web.js 엔진에서는 채널로 미디어를 보낼 수 없습니다.",
+      "linkPreview": "링크 미리보기 생성",
+      "postPlaceholder": "채널에 게시…"
     },
     "errors": {
       "loadSessions": "세션을 불러오지 못했습니다",

@@ -89,6 +89,8 @@ import { ChatActions } from '../components/chats/ChatRowMenu';
 import { Modal } from '../components/Modal';
 import ChatThread from '../components/chats/ChatThread';
 import ChatComposer, { type StagedAttachment } from '../components/chats/ChatComposer';
+import ChannelPostBar from '../components/chats/ChannelPostBar';
+import { canPostToChannel } from '../utils/channelPosting';
 import StatusMedia from '../components/chats/StatusMedia';
 import StatusComposeModal from '../components/chats/StatusComposeModal';
 import './Chats.css';
@@ -2213,8 +2215,9 @@ export function Chats() {
                 />
               </div>
             ) : activeChannel ? (
-              // Read-only channel pane: no send footer, reactions, delete, reply, or markChatRead —
-              // subscribed channels are a broadcast feed, not a two-way conversation.
+              // Channel pane: a broadcast feed, so no reactions, delete, reply, or markChatRead. The post
+              // bar appears only where the session owns or administers the channel (canPostToChannel);
+              // for a plain subscriber the pane stays read-only.
               <div key={activeChannel.id} className="channel-room">
                 <header className="chats-room-header">
                   <button className="room-back" onClick={() => setActiveChannel(null)} aria-label={t('common.back')}>
@@ -2255,6 +2258,9 @@ export function Chats() {
                     ))
                   )}
                 </div>
+                {selectedSessionId && canPostToChannel(activeChannel, canWrite) && (
+                  <ChannelPostBar sessionId={selectedSessionId} channelId={activeChannel.id} />
+                )}
               </div>
             ) : activeStatusGroup ? (
               // Read-only status viewer: no send footer, reactions, delete, reply, or markChatRead —

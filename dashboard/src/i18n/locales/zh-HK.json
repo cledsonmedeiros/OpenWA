@@ -194,7 +194,10 @@
       "empty": "你尚未訂閱任何頻道。",
       "notReady": "工作階段尚未就緒。",
       "subscribers": "{{count}} 位訂閱者",
-      "subscribers_other": "{{count}} 位訂閱者"
+      "subscribers_other": "{{count}} 位訂閱者",
+      "attachUnsupported": "whatsapp-web.js 引擎不支援向頻道傳送媒體。",
+      "linkPreview": "產生連結預覽",
+      "postPlaceholder": "發佈到頻道…"
     },
     "errors": {
       "loadSessions": "載入工作階段失敗",

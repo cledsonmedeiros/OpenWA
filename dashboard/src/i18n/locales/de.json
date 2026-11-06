@@ -194,7 +194,10 @@
       "empty": "Du hast noch keine Kanäle abonniert.",
       "notReady": "Die Sitzung ist noch nicht bereit.",
       "subscribers": "{{count}} Abonnent",
-      "subscribers_other": "{{count}} Abonnenten"
+      "subscribers_other": "{{count}} Abonnenten",
+      "attachUnsupported": "Das Senden von Medien an Kanäle wird von der whatsapp-web.js-Engine nicht unterstützt.",
+      "linkPreview": "Linkvorschau erzeugen",
+      "postPlaceholder": "Im Kanal posten…"
     },
     "errors": {
       "loadSessions": "Sitzungen konnten nicht geladen werden",

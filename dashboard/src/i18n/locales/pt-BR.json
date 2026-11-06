@@ -199,7 +199,10 @@
       "notReady": "A sessão ainda não está pronta.",
       "subscribers": "{{count}} inscrito",
       "subscribers_other": "{{count}} inscritos",
-      "subscribers_many": "{{count}} inscritos"
+      "subscribers_many": "{{count}} inscritos",
+      "attachUnsupported": "Envio de mídia para canais não é suportado no engine whatsapp-web.js.",
+      "linkPreview": "Gerar preview do link",
+      "postPlaceholder": "Publicar no canal…"
     },
     "errors": {
       "loadSessions": "Erro ao carregar as sessões",

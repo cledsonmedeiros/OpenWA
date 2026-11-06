@@ -194,7 +194,10 @@
       "empty": "You are not subscribed to any channels yet.",
       "notReady": "Session is not ready yet.",
       "subscribers": "{{count}} subscriber",
-      "subscribers_other": "{{count}} subscribers"
+      "subscribers_other": "{{count}} subscribers",
+      "attachUnsupported": "Sending media to channels is not supported on the whatsapp-web.js engine.",
+      "linkPreview": "Generate link preview",
+      "postPlaceholder": "Post to the channel…"
     },
     "errors": {
       "loadSessions": "Failed to load sessions",

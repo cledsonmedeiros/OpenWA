@@ -215,7 +215,10 @@
       "subscribers_two": "{{count}} مشتركان",
       "subscribers_few": "{{count}} مشتركين",
       "subscribers_many": "{{count}} مشترك",
-      "subscribers_zero": "{{count}} مشترك"
+      "subscribers_zero": "{{count}} مشترك",
+      "attachUnsupported": "إرسال الوسائط إلى القنوات غير مدعوم في محرك whatsapp-web.js.",
+      "linkPreview": "إنشاء معاينة للرابط",
+      "postPlaceholder": "انشر في القناة…"
     },
     "errors": {
       "loadSessions": "فشل تحميل الجلسات",

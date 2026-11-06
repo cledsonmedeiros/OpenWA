@@ -205,7 +205,10 @@
       "subscribers": "{{count}} מנוי",
       "subscribers_many": "{{count}} מנויים",
       "subscribers_other": "{{count}} מנויים",
-      "subscribers_two": "שני מנויים"
+      "subscribers_two": "שני מנויים",
+      "attachUnsupported": "שליחת מדיה לערוצים אינה נתמכת במנוע whatsapp-web.js.",
+      "linkPreview": "יצירת תצוגה מקדימה לקישור",
+      "postPlaceholder": "פרסום בערוץ…"
     },
     "errors": {
       "loadSessions": "טעינת הסשנים נכשלה",

@@ -194,7 +194,10 @@
       "empty": "Anda belum berlangganan saluran apa pun.",
       "notReady": "Sesi belum siap.",
       "subscribers": "{{count}} pelanggan",
-      "subscribers_other": "{{count}} pelanggan"
+      "subscribers_other": "{{count}} pelanggan",
+      "attachUnsupported": "Mengirim media ke saluran tidak didukung oleh mesin whatsapp-web.js.",
+      "linkPreview": "Buat pratinjau tautan",
+      "postPlaceholder": "Posting ke saluran…"
     },
     "errors": {
       "loadSessions": "Gagal memuat sesi",

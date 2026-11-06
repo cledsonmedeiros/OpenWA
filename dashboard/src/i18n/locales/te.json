@@ -194,7 +194,10 @@
       "empty": "మీరు ఇంకా ఏ ఛానెల్‌కూ సబ్‌స్క్రైబ్ చేయలేదు.",
       "notReady": "సెషన్ ఇంకా సిద్ధంగా లేదు.",
       "subscribers": "{{count}} సబ్‌స్క్రైబర్",
-      "subscribers_other": "{{count}} సబ్‌స్క్రైబర్‌లు"
+      "subscribers_other": "{{count}} సబ్‌స్క్రైబర్‌లు",
+      "attachUnsupported": "whatsapp-web.js ఇంజిన్‌లో ఛానెల్‌లకు మీడియా పంపడం మద్దతు లేదు.",
+      "linkPreview": "లింక్ ప్రివ్యూ రూపొందించు",
+      "postPlaceholder": "ఛానెల్‌లో పోస్ట్ చేయండి…"
     },
     "errors": {
       "loadSessions": "సెషన్లను లోడ్ చేయడం విఫలమైంది",

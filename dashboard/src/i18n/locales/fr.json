@@ -199,7 +199,10 @@
       "notReady": "La session n'est pas encore prête.",
       "subscribers": "{{count}} abonné",
       "subscribers_other": "{{count}} abonnés",
-      "subscribers_many": "{{count}} abonnés"
+      "subscribers_many": "{{count}} abonnés",
+      "attachUnsupported": "L'envoi de médias vers les chaînes n'est pas pris en charge par le moteur whatsapp-web.js.",
+      "linkPreview": "Générer l'aperçu du lien",
+      "postPlaceholder": "Publier sur la chaîne…"
     },
     "errors": {
       "loadSessions": "Échec du chargement des sessions",

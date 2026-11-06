@@ -194,7 +194,10 @@
       "empty": "आपने अभी तक किसी भी चैनल की सदस्यता नहीं ली है।",
       "notReady": "सत्र अभी तैयार नहीं है।",
       "subscribers": "{{count}} सदस्य",
-      "subscribers_other": "{{count}} सदस्य"
+      "subscribers_other": "{{count}} सदस्य",
+      "attachUnsupported": "whatsapp-web.js इंजन पर चैनलों में मीडिया भेजना समर्थित नहीं है।",
+      "linkPreview": "लिंक पूर्वावलोकन बनाएँ",
+      "postPlaceholder": "चैनल में पोस्ट करें…"
     },
     "errors": {
       "loadSessions": "सत्र लोड करने में विफल",
