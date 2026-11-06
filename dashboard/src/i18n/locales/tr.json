@@ -208,7 +208,8 @@
       "textAfter": "Metin görsellerden sonra",
       "moveUp": "{{name}} yukarı taşı",
       "moveDown": "{{name}} aşağı taşı",
-      "removeImage": "{{name}} kaldır"
+      "removeImage": "{{name}} kaldır",
+      "uncertainBatch": "Bağlantı gönderim ortasında koptu; gönderildiği doğrulanan {{count}} görsel kaldırıldı. Kalanını göndermeden önce kanalı kontrol edin."
     },
     "errors": {
       "loadSessions": "Oturumlar yüklenemedi",

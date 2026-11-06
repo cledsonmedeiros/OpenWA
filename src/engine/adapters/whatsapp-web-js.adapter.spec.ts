@@ -1666,6 +1666,15 @@ describe('WhatsAppWebJsAdapter channel-JID guard (#554 — wwebjs Channel lacks 
         expect(sendMessage).toHaveBeenCalledWith(NEWSLETTER, expect.anything(), expect.anything());
       });
 
+      it('refuses a send-image whose content is not an image, before anything is sent', async () => {
+        const sendMessage = jest.fn();
+        const err = await readyAdapter({ sendMessage })
+          .sendImageMessage(NEWSLETTER, { mimetype: 'video/mp4', data: Buffer.from([1]).toString('base64') })
+          .catch((e: unknown) => e);
+        expect(err).toBeInstanceOf(ChannelMediaNotSupportedError);
+        expect(sendMessage).not.toHaveBeenCalled();
+      });
+
       it('still refuses a video to a channel: only images are routed through the patch', async () => {
         const sendMessage = jest.fn();
         const err = await readyAdapter({ sendMessage })

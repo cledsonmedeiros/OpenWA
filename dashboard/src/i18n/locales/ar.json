@@ -229,7 +229,8 @@
       "textAfter": "النص بعد الصور",
       "moveUp": "نقل {{name}} لأعلى",
       "moveDown": "نقل {{name}} لأسفل",
-      "removeImage": "إزالة {{name}}"
+      "removeImage": "إزالة {{name}}",
+      "uncertainBatch": "انقطع الاتصال أثناء الإرسال؛ أُزيلت {{count}} صور مؤكدٌ نشرها. تحقق من القناة قبل إرسال الباقي."
     },
     "errors": {
       "loadSessions": "فشل تحميل الجلسات",

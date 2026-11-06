@@ -213,7 +213,8 @@
       "textAfter": "Texte après les images",
       "moveUp": "Monter {{name}}",
       "moveDown": "Descendre {{name}}",
-      "removeImage": "Retirer {{name}}"
+      "removeImage": "Retirer {{name}}",
+      "uncertainBatch": "La connexion a échoué en cours d'envoi ; {{count}} images confirmées comme publiées ont été retirées. Vérifiez la chaîne avant d'envoyer le reste."
     },
     "errors": {
       "loadSessions": "Échec du chargement des sessions",

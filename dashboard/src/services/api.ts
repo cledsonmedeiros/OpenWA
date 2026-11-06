@@ -1109,10 +1109,11 @@ export const sessionApi = {
       signal,
     ),
   getSubscribedChannels: (id: string) => request<Channel[]>(`/sessions/${id}/channels`),
-  postChannelImages: (id: string, channelId: string, body: PostChannelImagesRequest) =>
+  postChannelImages: (id: string, channelId: string, body: PostChannelImagesRequest, idempotencyKey: string) =>
     request<ChannelPostResult>(`/sessions/${id}/channels/${encodeURIComponent(channelId)}/posts/images`, {
       method: 'POST',
       body: JSON.stringify(body),
+      headers: { 'Idempotency-Key': idempotencyKey },
     }),
   getChannelMessages: (id: string, channelId: string, limit = 50) =>
     request<ChannelMessage[]>(`/sessions/${id}/channels/${encodeURIComponent(channelId)}/messages?limit=${limit}`),

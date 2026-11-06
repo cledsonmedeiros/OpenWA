@@ -213,7 +213,8 @@
       "textAfter": "Texto depois das imagens",
       "moveUp": "Mover {{name}} para cima",
       "moveDown": "Mover {{name}} para baixo",
-      "removeImage": "Remover {{name}}"
+      "removeImage": "Remover {{name}}",
+      "uncertainBatch": "A conexão caiu no meio do envio; {{count}} imagens confirmadas como publicadas foram removidas. Confira o canal antes de enviar o restante."
     },
     "errors": {
       "loadSessions": "Erro ao carregar as sessões",

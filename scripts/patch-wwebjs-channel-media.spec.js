@@ -37,10 +37,21 @@ test('routes media sends through sendNewsletterMediaMsg and leaves text on the j
   assert.ok(out.includes(".require('WAWebNewsletterSendMessageJob')"), 'text and polls keep the job');
 });
 
-test('never reports success without an ack, so the caller cannot read ack.t off undefined', () => {
+test('throws when WhatsApp gave the media post no server id, instead of acking a post that never landed', () => {
   const { root, utils } = makeDependency(`${SHIPPED}\n`);
   applyPatch(root);
-  assert.ok(fs.readFileSync(utils, 'utf8').includes('r && r.success && r.ack ? r : { success: false }'));
+  const out = fs.readFileSync(utils, 'utf8');
+  assert.ok(out.includes("if (!msg.serverId) throw new Error('channel media send was not acknowledged by WhatsApp');"));
+  // The action's own answer is never read: the code after it only takes ack.t/serverId on success, and
+  // { success: false } keeps the server id the action wrote on the model from being overwritten.
+  assert.ok(out.includes('return { success: false };'));
+  assert.ok(!out.includes('r.success'));
+});
+
+test('the action result is wrapped, so a non-thenable answer cannot throw a TypeError', () => {
+  const { root, utils } = makeDependency(`${SHIPPED}\n`);
+  applyPatch(root);
+  assert.ok(fs.readFileSync(utils, 'utf8').includes('await Promise.resolve(\n'));
 });
 
 test('is idempotent', () => {

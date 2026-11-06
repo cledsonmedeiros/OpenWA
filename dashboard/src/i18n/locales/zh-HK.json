@@ -208,7 +208,8 @@
       "textAfter": "文字在圖片後",
       "moveUp": "上移 {{name}}",
       "moveDown": "下移 {{name}}",
-      "removeImage": "移除 {{name}}"
+      "removeImage": "移除 {{name}}",
+      "uncertainBatch": "傳送中途連線中斷；已移除 {{count}} 張確認已發佈的圖片。傳送其餘圖片前請先檢查頻道。"
     },
     "errors": {
       "loadSessions": "載入工作階段失敗",

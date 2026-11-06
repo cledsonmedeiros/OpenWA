@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { messageApi, sessionApi, type ChannelPostProgress } from '../../services/api';
+import { messageApi, sessionApi, type ChannelPostProgress, type PostChannelImagesRequest } from '../../services/api';
 import { useRole } from '../../hooks/useRole';
 import { useToast } from '../../hooks/useToast';
 import { buildChannelTextOptions } from '../../utils/channelPosting';
@@ -26,6 +26,17 @@ interface PickedImage extends TrayImage {
   file: File;
 }
 
+/**
+ * A batch as it was sent, kept until the gateway answers it. A retry of the same tray (same images in the
+ * same order, same text) resends this exact body under the same Idempotency-Key, so the gateway replays
+ * or refuses it instead of posting the images a second time.
+ */
+interface PreparedBatch {
+  signature: string;
+  idempotencyKey: string;
+  body: PostChannelImagesRequest;
+}
+
 // Post bar for a channel the session owns or administers (the pane decides via canPostToChannel).
 // Text on its own goes through send-text. With images it posts a batch: up to 10, compressed in the
 // browser, in the tray's order, with the text before or after them; progress comes from the socket and
@@ -44,6 +55,14 @@ function ChannelPostBar({ sessionId, channelId, mediaSupported = false, progress
   const [images, setImages] = useState<PickedImage[]>([]);
   const [sending, setSending] = useState(false);
   const [activePostId, setActivePostId] = useState<string | null>(null);
+  const preparedRef = useRef<PreparedBatch | null>(null);
+  // Indexes the socket confirmed as posted for the batch in flight: what a failed HTTP answer cannot tell.
+  const confirmedRef = useRef<Set<number>>(new Set());
+  useEffect(() => {
+    if (progress && progress.postId === activePostId && progress.status === 'sent') {
+      confirmedRef.current.add(progress.index);
+    }
+  }, [progress, activePostId]);
 
   // Object URLs are released with the image that owns them, and all of them on unmount.
   const imagesRef = useRef(images);
@@ -90,20 +109,50 @@ function ChannelPostBar({ sessionId, channelId, mediaSupported = false, progress
   const refetchFeed = () =>
     void queryClient.invalidateQueries({ queryKey: ['channel-messages', sessionId, channelId] });
 
-  const sendBatch = async (toSend: string) => {
-    const batch = images;
-    const compressed = await Promise.all(batch.map(i => compressImage(i.file)));
+  const prepareBatch = async (toSend: string): Promise<PreparedBatch | null> => {
+    const signature = JSON.stringify([images.map(i => i.id), toSend, textPosition, previewEnabled]);
+    if (preparedRef.current?.signature === signature) return preparedRef.current;
+    const compressed = await Promise.all(images.map(i => compressImage(i.file)));
     if (!fitsBatch(compressed)) {
       showWarningToast(t('chats.channels.batchTooLarge'));
-      return;
+      return null;
     }
-    const postId = newUuid();
-    setActivePostId(postId);
-    const result = await sessionApi.postChannelImages(sessionId, channelId, {
-      postId,
-      images: compressed.map(c => ({ base64: c.base64, mimetype: c.mimetype })),
-      ...(toSend ? { text: toSend, textPosition, ...buildChannelTextOptions(previewEnabled) } : {}),
-    });
+    preparedRef.current = {
+      signature,
+      idempotencyKey: newUuid(),
+      body: {
+        postId: newUuid(),
+        images: compressed.map(c => ({ base64: c.base64, mimetype: c.mimetype })),
+        ...(toSend ? { text: toSend, textPosition, ...buildChannelTextOptions(previewEnabled) } : {}),
+      },
+    };
+    return preparedRef.current;
+  };
+
+  const sendBatch = async (toSend: string) => {
+    const batch = images;
+    const prepared = await prepareBatch(toSend);
+    if (!prepared) return;
+    confirmedRef.current = new Set();
+    setActivePostId(prepared.body.postId);
+    let result;
+    try {
+      result = await sessionApi.postChannelImages(sessionId, channelId, prepared.body, prepared.idempotencyKey);
+    } catch (err) {
+      // The answer was lost, not necessarily the posts: drop what the socket saw go out, and start a new
+      // batch (new key) for the rest, since its body is no longer the one that was sent.
+      const confirmed = [...confirmedRef.current];
+      if (confirmed.length > 0) {
+        setImages(prev => {
+          prev.filter((_, i) => confirmed.includes(i)).forEach(i => URL.revokeObjectURL(i.previewUrl));
+          return prev.filter((_, i) => !confirmed.includes(i));
+        });
+        preparedRef.current = null;
+        showWarningToast(t('chats.channels.uncertainBatch', { count: confirmed.length }));
+      }
+      throw err;
+    }
+    preparedRef.current = null;
     refetchFeed();
     if (result.failedAt !== undefined) {
       // Only the images that went out leave the tray; the text stays if it did not go out.

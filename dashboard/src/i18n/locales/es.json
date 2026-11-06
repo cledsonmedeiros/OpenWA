@@ -213,7 +213,8 @@
       "textAfter": "Texto después de las imágenes",
       "moveUp": "Subir {{name}}",
       "moveDown": "Bajar {{name}}",
-      "removeImage": "Quitar {{name}}"
+      "removeImage": "Quitar {{name}}",
+      "uncertainBatch": "La conexión falló a mitad del envío; se quitaron {{count}} imágenes confirmadas como publicadas. Revisa el canal antes de enviar el resto."
     },
     "errors": {
       "loadSessions": "Error al cargar las sesiones",

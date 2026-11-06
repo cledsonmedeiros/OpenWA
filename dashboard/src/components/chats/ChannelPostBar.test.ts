@@ -14,6 +14,7 @@ let queryClient: QueryClient;
 interface Sent {
   path: string;
   body: Record<string, unknown>;
+  idempotencyKey?: string | null;
 }
 const sent: Sent[] = [];
 let nextStatus = 200;
@@ -32,6 +33,9 @@ before(async () => {
     sent.push({
       path: new URL(typeof input === 'string' ? input : input.toString(), 'http://localhost').pathname,
       body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>,
+      ...(new Headers(init?.headers).get('Idempotency-Key')
+        ? { idempotencyKey: new Headers(init?.headers).get('Idempotency-Key') }
+        : {}),
     });
     if (holdNext) await new Promise<void>(resolve => (release = resolve));
     const ok = nextStatus < 400;
@@ -270,4 +274,48 @@ test('a batch over 18 MiB after compression warns and sends nothing', async () =
   rtl.fireEvent.click(sendButton());
   await rtl.waitFor(() => assert.ok(rtl.screen.getByText('These images are too large to post together; remove some and try again.')));
   assert.equal(sent.length, 0);
+});
+
+test('a batch carries an Idempotency-Key, and a retry after a failure with nothing confirmed reuses it and the postId', async () => {
+  nextStatus = 500;
+  renderBar({ mediaSupported: true });
+  pick(['a.png', 'b.png']);
+  await rtl.waitFor(() => assert.equal(trayNames().length, 2));
+  rtl.fireEvent.click(sendButton());
+  await rtl.waitFor(() => assert.equal(sent.length, 1));
+  await rtl.waitFor(() => assert.equal(sendButton().disabled, false));
+  const first = sent[0];
+  assert.match(String(first.idempotencyKey), /^[0-9a-f-]{36}$/);
+
+  nextStatus = 201;
+  nextBody = { mode: 'individual', sent: [] };
+  rtl.fireEvent.click(sendButton());
+  await rtl.waitFor(() => assert.equal(sent.length, 2));
+  assert.equal(sent[1].idempotencyKey, first.idempotencyKey);
+  assert.deepEqual(sent[1].body, first.body);
+});
+
+test('a failed HTTP answer after progress frames confirmed some images removes those from the tray', async () => {
+  holdNext = true;
+  nextStatus = 504;
+  const { rerender } = renderBar({ mediaSupported: true });
+  pick(['a.png', 'b.png', 'c.png']);
+  await rtl.waitFor(() => assert.equal(trayNames().length, 3));
+  rtl.fireEvent.click(sendButton());
+  await rtl.waitFor(() => assert.equal(sent.length, 1));
+  const postId = (sent[0].body as { postId: string }).postId;
+  const frame = (index: number) =>
+    wrap(
+      createElement(ChannelPostBar, {
+        sessionId: 's1',
+        channelId: 'c@newsletter',
+        mediaSupported: true,
+        progress: { postId, channelId: 'c@newsletter', index, total: 3, mode: 'individual', status: 'sent' },
+      } as never),
+    );
+  rerender(frame(0));
+  rerender(frame(1));
+  release!();
+  await rtl.waitFor(() => assert.deepEqual(trayNames(), ['c.png']));
+  assert.ok(rtl.screen.getByText('The connection failed mid-batch; 2 images confirmed as posted were removed. Check the channel before sending the rest.'));
 });

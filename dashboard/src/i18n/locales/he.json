@@ -219,7 +219,8 @@
       "textAfter": "טקסט אחרי התמונות",
       "moveUp": "הזזת {{name}} למעלה",
       "moveDown": "הזזת {{name}} למטה",
-      "removeImage": "הסרת {{name}}"
+      "removeImage": "הסרת {{name}}",
+      "uncertainBatch": "החיבור נפל באמצע השליחה; {{count}} תמונות שאושרו כמפורסמות הוסרו. בדקו את הערוץ לפני שליחת השאר."
     },
     "errors": {
       "loadSessions": "טעינת הסשנים נכשלה",

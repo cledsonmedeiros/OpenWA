@@ -9,9 +9,11 @@
  * `beforeSend` hands the message back unchanged. Verified live on WA Web 2.3000.1053430300: an image
  * with a caption reached a channel with a server id and rendered on the phone.
  *
- * Only the media branch changes; text and polls keep `sendNewsletterMessageJob`. The action answers a
- * result whose shape is not documented, so anything without `success` and an `ack` reads as
- * `{ success: false }` — the code that follows then skips its `ack.t` read instead of throwing.
+ * Only the media branch changes; text and polls keep `sendNewsletterMessageJob`. The action's own
+ * answer is undocumented, so success is read off the model instead: WA Web writes the server id on the
+ * message once the post is accepted (seen live as `serverId` 104). No server id throws — an ambiguous
+ * failure, never a false ack — and the media branch answers `{ success: false }` so the code that
+ * follows neither reads `ack.t` nor overwrites the server id the action set.
  *
  * Exact-shape and self-disabling, like the other patchers: an unknown shape fails the production
  * image build instead of silently shipping without the fix.
@@ -30,10 +32,14 @@ const LEGACY = `            const sendChannelMsgResponse = await window
                 .sendNewsletterMessageJob({`;
 
 const PATCHED = `            const sendChannelMsgResponse = isMedia
-                ? await window
-                      .require('WAWebNewsletterSendMsgAction')
-                      .sendNewsletterMediaMsg(chat, msg, () => Promise.resolve(msg))
-                      .then(r => (r && r.success && r.ack ? r : { success: false }))
+                ? await Promise.resolve(
+                      window
+                          .require('WAWebNewsletterSendMsgAction')
+                          .sendNewsletterMediaMsg(chat, msg, () => Promise.resolve(msg)),
+                  ).then(() => {
+                      if (!msg.serverId) throw new Error('channel media send was not acknowledged by WhatsApp');
+                      return { success: false };
+                  })
                 : await window
                 .require('WAWebNewsletterSendMessageJob')
                 .sendNewsletterMessageJob({`;

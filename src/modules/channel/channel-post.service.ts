@@ -4,11 +4,15 @@ import { MessageService } from '../message/message.service';
 import { EventsGateway } from '../events/events.gateway';
 import { ChannelMediaNotSupportedError } from '../../common/errors/channel-media-not-supported.error';
 import { assertBase64WithinMediaCap, stripBase64DataUri } from '../message/media-cap.util';
+import { loadRemoteMediaBuffer } from '../../common/media/load-remote-media';
+import { EngineRegistry } from '../../engine/engine-registry.service';
 import type { ChannelImageDto, PostChannelImagesDto } from './dto/post-channel-images.dto';
 import type { ChannelPostProgress } from './channel-post.types';
 import type { ChannelPostResultDto } from './dto/channel-post-result.dto';
 
 export type ChannelPostResultBody = ChannelPostResultDto;
+
+const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{2,3})?$/;
 
 /** 201: everything went out. 207: something went out and then a send failed; the batch stopped there. */
 export interface ChannelPostResult {
@@ -31,12 +35,15 @@ export class ChannelPostService {
     private readonly channels: ChannelService,
     private readonly messages: MessageService,
     private readonly events: EventsGateway,
+    private readonly engines: EngineRegistry,
   ) {}
 
   async postImages(sessionId: string, channelId: string, dto: PostChannelImagesDto): Promise<ChannelPostResult> {
     const channel = await this.channels.getChannelById(sessionId, channelId);
     if (!channel.mediaSupported) throw new ChannelMediaNotSupportedError();
-    dto.images.forEach((image, index) => this.assertSendable(image, index));
+    // Every image is checked and every URL fetched (SSRF-guarded, through the session's proxy) before
+    // the first send, so a bad item anywhere refuses the whole batch with nothing posted.
+    const images = await this.resolveImages(sessionId, dto.images);
 
     const total = dto.images.length;
     const mode = 'individual' as const;
@@ -67,7 +74,7 @@ export class ChannelPostService {
       await sendText();
     }
 
-    for (const [index, image] of dto.images.entries()) {
+    for (const [index, image] of images.entries()) {
       try {
         const res = await this.messages.sendImage(sessionId, { chatId: channelId, ...image });
         body.sent.push({ index, messageId: res.messageId });
@@ -91,8 +98,29 @@ export class ChannelPostService {
     return { status: 201, body };
   }
 
-  /** The checks a send would fail on, run over the whole batch before the first send. */
-  private assertSendable(image: ChannelImageDto, index: number): void {
+  /** Validate every image and turn URL ones into base64, all before anything is sent. */
+  private async resolveImages(
+    sessionId: string,
+    images: ChannelImageDto[],
+  ): Promise<{ base64: string; mimetype: string }[]> {
+    images.forEach((image, index) => this.assertShape(image, index));
+    const proxyUrl = images.some(i => i.url) ? this.engines.proxyUrl(sessionId) : undefined;
+    const resolved: { base64: string; mimetype: string }[] = [];
+    for (const [index, image] of images.entries()) {
+      if (!image.url) {
+        resolved.push({ base64: stripBase64DataUri(image.base64)!, mimetype: image.mimetype! });
+        continue;
+      }
+      const fetched = await loadRemoteMediaBuffer(image.url, proxyUrl);
+      if (!fetched.mimetype.startsWith('image/')) {
+        throw new BadRequestException(`images[${index}]: the URL did not answer an image`);
+      }
+      resolved.push({ base64: fetched.data.toString('base64'), mimetype: fetched.mimetype });
+    }
+    return resolved;
+  }
+
+  private assertShape(image: ChannelImageDto, index: number): void {
     const base64 = stripBase64DataUri(image.base64);
     if (!base64 === !image.url) {
       throw new BadRequestException(`images[${index}]: provide exactly one of url or base64`);
@@ -100,6 +128,9 @@ export class ChannelPostService {
     if (base64) {
       if (!image.mimetype?.startsWith('image/')) {
         throw new BadRequestException(`images[${index}]: mimetype must be an image/* type`);
+      }
+      if (!BASE64.test(base64.replace(/\s+/g, ''))) {
+        throw new BadRequestException(`images[${index}]: base64 is not valid`);
       }
       assertBase64WithinMediaCap(base64);
     }

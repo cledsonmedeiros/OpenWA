@@ -208,7 +208,8 @@
       "textAfter": "Text nach den Bildern",
       "moveUp": "{{name}} nach oben",
       "moveDown": "{{name}} nach unten",
-      "removeImage": "{{name}} entfernen"
+      "removeImage": "{{name}} entfernen",
+      "uncertainBatch": "Die Verbindung brach mitten im Versand ab; {{count}} als gepostet bestätigte Bilder wurden entfernt. Prüfe den Kanal, bevor du den Rest sendest."
     },
     "errors": {
       "loadSessions": "Sitzungen konnten nicht geladen werden",

@@ -33,6 +33,7 @@ import { EngineNotReadyError } from '../../common/errors/engine-not-ready.error'
 import { RecipientLookupUnansweredError } from '../../common/errors/engine-page.error';
 import { type WwebjsEngineHost, requireClient, withPage } from './wwebjs-host';
 import { type ChannelMediaKind } from './wwebjs-channel-media-status';
+import { ChannelMediaNotSupportedError } from '../../common/errors/channel-media-not-supported.error';
 import { toCapturedPageError } from './wwebjs-lifecycle';
 
 /**
@@ -676,6 +677,12 @@ export class WwebjsMessaging {
 
     // Build the media once (a remote URL is fetched here); sendResolved may retry the send itself.
     const messageMedia = await toMessageMedia(media, this.host.config.proxy?.url, { fallbackType });
+    // The guard above judged the route; a channel only takes what the patch was verified for, so the
+    // content decides too: a video posted through send-image (by URL or a declared mimetype) stops here,
+    // before anything was sent.
+    if (/@\w*newsletter\b/.test(chatId) && !messageMedia.mimetype.startsWith('image/')) {
+      throw new ChannelMediaNotSupportedError();
+    }
     // A nameless document reaches WA Web as `new File([blob], undefined)` and is labelled literally
     // "undefined". Only documents render a filename, so default just this path — as Baileys does.
     if (extraOptions?.sendMediaAsDocument && !messageMedia.filename) {

@@ -47,6 +47,13 @@ func TestIdempotencyKeyReachesOnlyRoutesThatHonorIt(t *testing.T) {
 		{"do with a non-POST method", func() error {
 			return c.Do(ctx, "GET", "/api/sessions/s/messages/send-text?x=1", nil, nil, nil)
 		}, ""},
+		{"channel image batch", func() error {
+			_, err := c.Channels.PostImages(ctx, "s", "c@newsletter", PostChannelImagesRequest{})
+			return err
+		}, "order-1"},
+		{"do on another channel route", func() error {
+			return c.Do(ctx, "POST", "/api/sessions/s/channels/c%40newsletter/mute", nil, map[string]string{}, nil)
+		}, ""},
 		{"do on another route", func() error { return c.Do(ctx, "POST", "/api/sessions/s/groups", nil, map[string]string{}, nil) }, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

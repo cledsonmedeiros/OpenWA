@@ -208,7 +208,8 @@
       "textAfter": "文字在图片后",
       "moveUp": "上移 {{name}}",
       "moveDown": "下移 {{name}}",
-      "removeImage": "移除 {{name}}"
+      "removeImage": "移除 {{name}}",
+      "uncertainBatch": "发送中途连接中断；已移除 {{count}} 张确认已发布的图片。发送其余图片前请先检查频道。"
     },
     "errors": {
       "loadSessions": "加载会话失败",

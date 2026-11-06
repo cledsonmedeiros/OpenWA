@@ -1,4 +1,8 @@
-import { InternalServerErrorException } from '@nestjs/common';
+import { BadRequestException, InternalServerErrorException } from '@nestjs/common';
+import { loadRemoteMediaBuffer } from '../../common/media/load-remote-media';
+
+// The SSRF-guarded fetch is the network edge; each test says what a URL answers.
+jest.mock('../../common/media/load-remote-media', () => ({ loadRemoteMediaBuffer: jest.fn() }));
 import { ChannelPostService } from './channel-post.service';
 import { ChannelMediaNotSupportedError } from '../../common/errors/channel-media-not-supported.error';
 import type { PostChannelImagesDto } from './dto/post-channel-images.dto';
@@ -29,7 +33,8 @@ function setup(opts: { mediaSupported?: boolean; failImageAt?: number; failText?
     }),
   };
   const events = { emitChannelPostProgress: jest.fn<void, [string, ChannelPostProgress]>() };
-  const service = new ChannelPostService(channels as never, messages as never, events as never);
+  const engines = { proxyUrl: jest.fn().mockReturnValue('socks5://proxy:1080') };
+  const service = new ChannelPostService(channels as never, messages as never, events as never, engines as never);
   return { service, calls, messages, events, channels };
 }
 
@@ -138,6 +143,49 @@ describe('ChannelPostService.postImages', () => {
     await expect(service.postImages('s1', CHANNEL, both)).rejects.toThrow(
       'images[0]: provide exactly one of url or base64',
     );
+    expect(messages.sendImage).not.toHaveBeenCalled();
+  });
+
+  it('fetches URL images through the guarded loader before the first send and posts them as base64', async () => {
+    jest.mocked(loadRemoteMediaBuffer).mockResolvedValueOnce({ data: Buffer.from([1, 2, 3]), mimetype: 'image/png' });
+    const { service, messages } = setup();
+    const batch = dto(2);
+    batch.images[1] = { url: 'https://cdn.example/b.png' };
+    await service.postImages('s1', CHANNEL, batch);
+    expect(loadRemoteMediaBuffer).toHaveBeenCalledWith('https://cdn.example/b.png', 'socks5://proxy:1080');
+    expect(messages.sendImage).toHaveBeenNthCalledWith(2, 's1', {
+      chatId: CHANNEL,
+      base64: 'AQID',
+      mimetype: 'image/png',
+    });
+  });
+
+  it('a URL the guarded loader refuses (SSRF, 404, too large) is a 400 before anything is sent', async () => {
+    jest.mocked(loadRemoteMediaBuffer).mockRejectedValueOnce(new BadRequestException('blocked address'));
+    const { service, messages } = setup();
+    const batch = dto(3, { text: 'oi', textPosition: 'before' });
+    batch.images[2] = { url: 'http://169.254.169.254/x' };
+    await expect(service.postImages('s1', CHANNEL, batch)).rejects.toThrow('blocked address');
+    expect(messages.sendText).not.toHaveBeenCalled();
+    expect(messages.sendImage).not.toHaveBeenCalled();
+  });
+
+  it('a URL that answers something other than an image is a 400 before anything is sent', async () => {
+    jest.mocked(loadRemoteMediaBuffer).mockResolvedValueOnce({ data: Buffer.from([1]), mimetype: 'video/mp4' });
+    const { service, messages } = setup();
+    const batch = dto(2);
+    batch.images[1] = { url: 'https://cdn.example/clip' };
+    await expect(service.postImages('s1', CHANNEL, batch)).rejects.toThrow(
+      'images[1]: the URL did not answer an image',
+    );
+    expect(messages.sendImage).not.toHaveBeenCalled();
+  });
+
+  it('corrupt base64 is a 400 before anything is sent', async () => {
+    const { service, messages } = setup();
+    const batch = dto(2);
+    batch.images[1] = { base64: 'not base64!!', mimetype: 'image/jpeg' };
+    await expect(service.postImages('s1', CHANNEL, batch)).rejects.toThrow('images[1]: base64 is not valid');
     expect(messages.sendImage).not.toHaveBeenCalled();
   });
 

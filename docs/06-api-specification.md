@@ -4074,8 +4074,8 @@ while the channel reports `mediaSupported: true`.
 | `textPosition` | string  | No       | `before` \| `after` | Where the text goes; default `after`                               |
 | `linkPreview`  | boolean | No       | —                   | Same meaning as on `send-text`                                     |
 
-Every image is validated (one of `url`/`base64`, an `image/*` mimetype, the media size cap) before
-the first send. The sends then run one at a time through the regular message pipeline. Live progress
+Every image is validated (one of `url`/`base64`, valid base64, an `image/*` mimetype, the media size
+cap) and every `url` is fetched through the SSRF guard, all before the first send. The sends then run one at a time through the regular message pipeline. Live progress
 is emitted on the socket as `channel.post.progress` (`{ postId, channelId, index, total, mode, status,
 messageId? }`, one frame per image and a closing `done`).
 
