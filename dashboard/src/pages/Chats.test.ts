@@ -2925,8 +2925,9 @@ test('a sticker opens in the media viewer, as an image does', async () => {
   assert.ok(await screen.findByRole('button', { name: 'Download' }), 'the viewer did not open on the sticker');
 });
 
-// whatsapp-web.js reports that a channel post has media but gives no URL for it.
-test('a channel post with media and no URL says the media is unavailable', async () => {
+// whatsapp-web.js reports that a channel post has media but gives no URL for it. The feed downloads it by
+// the post id (ChannelMedia); when that download fails, as it does here, the bubble says so once it has.
+test('a channel post with media and no URL says the media is unavailable when its download fails', async () => {
   const { screen, fireEvent, within, waitFor } = rtl;
   engineType = 'whatsapp-web.js';
   window.sessionStorage.setItem('openwa_engine_type', engineType);
@@ -2942,7 +2943,7 @@ test('a channel post with media and no URL says the media is unavailable', async
     assert.ok(found, 'the post did not render');
     return found;
   });
-  assert.ok(within(bubble as HTMLElement).queryByText('Media unavailable'), 'the media post rendered empty');
+  assert.ok(await within(bubble as HTMLElement).findByText('Media unavailable'), 'the media post rendered empty');
 });
 
 // The role is a UX signal from the engine: only an owner or admin gets the post bar.

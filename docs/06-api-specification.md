@@ -2404,6 +2404,8 @@ Delete a message (for everyone by default); also clears the stored record and fl
 
 **Response** `200`
 
+On whatsapp-web.js a `chatId` that is a channel (`<id>@newsletter`) deletes the post for every subscriber through WhatsApp Web's own channel revoke, whatever `forEveryone` says, since a channel has no delete for me. It answers `404` for a post the page does not hold, `403` when WhatsApp does not allow the post to be deleted (one the account cannot revoke), and `503` when WhatsApp does not confirm the deletion. A bare `messageId` is read as the account's own post (`true_<channelId>_<id>`).
+
 After the engine delete, the stored message's body and `metadata` (inline media, quote, reactions) are cleared, its archived-media pointer is removed, and its `type` is set to `revoked`, the same as when the engine reports a revoke (`message.revoked`). The archived file itself is deleted later by the chat-media orphan sweep, once it has stayed unreferenced for the sweep's grace window. If the stored row under that id belongs to another chat than `chatId`, it is left as it is and the request still answers `200`. Note the `200` status (via `@HttpCode`).
 
 ```json

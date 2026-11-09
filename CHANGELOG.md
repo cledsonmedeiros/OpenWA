@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add `POST /api/sessions/{sessionId}/channels/{channelId}/posts/images` to post 1 to 10 images to a channel in order, one post each, with an optional text post before or after them. Each send goes through the regular message pipeline, live progress is emitted on the socket as `channel.post.progress`, and a send that fails after something went out stops the batch with a `207` listing what was posted, never re-sending. `postImages` in all five SDKs.
 - Pick, reorder and post up to 10 images from the dashboard channel pane, compressed in the browser, with the text before or after them and a live "n of N" counter.
 - Show the images, videos and audio of channel posts in the dashboard channel feed, downloaded through the message media route, instead of "Media unavailable".
+- Delete channel posts on whatsapp-web.js: `POST /api/sessions/{sessionId}/messages/delete` with a channel `chatId` now revokes the post through WhatsApp Web's channel action instead of failing with `500`, and the dashboard channel feed has a delete button on each post for channels the session owns or administers.
 
 ### Changed
 

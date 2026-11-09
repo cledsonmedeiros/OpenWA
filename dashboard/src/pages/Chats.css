@@ -3269,6 +3269,42 @@
   object-fit: cover;
 }
 
+/* Delete on a channel post the session owns or administers: in the bubble's corner, shown on hover or
+   keyboard focus, and always where there is no hover (touch). */
+.chats-page .channel-room .message-bubble {
+  position: relative;
+}
+
+.chats-page .channel-post-delete {
+  position: absolute;
+  top: 0.25rem;
+  inset-inline-end: 0.25rem;
+  display: inline-flex;
+  padding: 0.3rem;
+  border: none;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.chats-page .channel-room .message-bubble:hover .channel-post-delete,
+.chats-page .channel-post-delete:focus-visible {
+  opacity: 1;
+}
+
+.chats-page .channel-post-delete:disabled {
+  cursor: progress;
+}
+
+@media (hover: none) {
+  .chats-page .channel-post-delete {
+    opacity: 1;
+  }
+}
+
 /* Shown in place of media that cannot be shown: a status media blob that fails to load, or a
    channel post whose media has no URL. */
 .chats-page .status-media-placeholder {

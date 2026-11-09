@@ -16,6 +16,8 @@ import { MessageWithReactions, SerializedWid, readWid } from '../types/whatsapp-
 import { BadRequestException, NotImplementedException } from '@nestjs/common';
 import { MessageNotFoundError } from '../../common/errors/message-not-found.error';
 import { EngineRefusedError } from '../../common/errors/engine-refused.error';
+import { EngineTransportError } from '../../common/errors/engine-transport.error';
+import { revokeChannelPostInPage, type ChannelRevokeOutcome } from './wwebjs-channel-revoke';
 import { loadRemoteMediaBuffer } from '../../common/media/load-remote-media';
 import { chatKind, userPart } from '../identity/wa-id';
 import {
@@ -1108,6 +1110,7 @@ export class WwebjsMessaging {
 
   async deleteMessage(chatId: string, messageId: string, forEveryone: boolean = true): Promise<void> {
     this.host.ensureReady();
+    if (/@\w*newsletter\b/.test(chatId)) return this.revokeChannelPost(chatId, messageId);
     // NOTE: do NOT resolve chatId to @lid here — delete operates on the found message's own key, not
     // this chatId, so LID-resolving the lookup gives no benefit and would miss a message stored under
     // the pre-migration @c.us chat (#583).
@@ -1125,6 +1128,26 @@ export class WwebjsMessaging {
       await message.delete(forEveryone);
     });
     this.host.logger.debug('Deleted message', { chatId, messageId, forEveryone });
+  }
+
+  /**
+   * A channel post is always revoked for everyone: a channel has no "delete for me". Message#delete cannot
+   * reach a channel (see {@link revokeChannelPostInPage}), so the page's newsletter action does it.
+   */
+  private async revokeChannelPost(channelId: string, messageId: string): Promise<void> {
+    const { pupPage } = this.client() as unknown as {
+      pupPage: { evaluate: <T, A>(fn: (arg: A) => Promise<T>, arg: A) => Promise<T> };
+    };
+    const revoked: ChannelRevokeOutcome = await this.withPage('deleteMessage', () =>
+      pupPage.evaluate(revokeChannelPostInPage, { channelId, msgId: messageId }),
+    );
+    if (revoked.outcome === 'not_found') throw new MessageNotFoundError(messageId, channelId);
+    if (revoked.outcome === 'not_allowed')
+      throw new EngineRefusedError('WhatsApp does not allow this post to be deleted');
+    if (revoked.outcome === 'failed') {
+      throw new EngineTransportError(`WhatsApp did not confirm the channel post deletion (${revoked.result})`);
+    }
+    this.host.logger.debug('Deleted channel post', { channelId, messageId });
   }
 
   async editMessage(chatId: string, messageId: string, body: string, mentions?: string[]): Promise<MessageResult> {

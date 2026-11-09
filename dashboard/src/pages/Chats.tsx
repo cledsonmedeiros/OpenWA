@@ -94,6 +94,7 @@ import ChannelPostBar from '../components/chats/ChannelPostBar';
 import { canPostToChannel } from '../utils/channelPosting';
 import StatusMedia from '../components/chats/StatusMedia';
 import ChannelMedia from '../components/chats/ChannelMedia';
+import ChannelPostDelete from '../components/chats/ChannelPostDelete';
 import StatusComposeModal from '../components/chats/StatusComposeModal';
 import './Chats.css';
 
@@ -2279,6 +2280,13 @@ export function Chats() {
                           ))}
                         {m.body && <MessageBody text={stripMentionDelimiters(m.body)} className="message-text" />}
                         <span className="message-time">{formatChatTime(m.timestamp)}</span>
+                        {selectedSessionId && canPostToChannel(activeChannel, canWrite) && (
+                          <ChannelPostDelete
+                            sessionId={selectedSessionId}
+                            channelId={activeChannel.id}
+                            messageId={m.id}
+                          />
+                        )}
                       </div>
                     ))
                   )}
