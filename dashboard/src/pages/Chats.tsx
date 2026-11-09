@@ -93,6 +93,7 @@ import ChatComposer, { type StagedAttachment } from '../components/chats/ChatCom
 import ChannelPostBar from '../components/chats/ChannelPostBar';
 import { canPostToChannel } from '../utils/channelPosting';
 import StatusMedia from '../components/chats/StatusMedia';
+import ChannelMedia from '../components/chats/ChannelMedia';
 import StatusComposeModal from '../components/chats/StatusComposeModal';
 import './Chats.css';
 
@@ -285,9 +286,7 @@ export function Chats() {
     queryFn: () => sessionApi.getSubscribedChannels(selectedSessionId!),
     enabled: Boolean(selectedSessionId) && channelsSupported && activeTab === 'channels',
   });
-  const activeChannel = activeChannelId
-    ? (channelsQuery.data?.find(c => c.id === activeChannelId) ?? null)
-    : null;
+  const activeChannel = activeChannelId ? (channelsQuery.data?.find(c => c.id === activeChannelId) ?? null) : null;
   const selectChannel = useCallback((channel: Channel) => setActiveChannelId(channel.id), []);
   const channelMessages = useChannelMessages(selectedSessionId, activeChannel?.id ?? null);
 
@@ -2269,10 +2268,12 @@ export function Chats() {
                   ) : (
                     (channelMessages.data ?? []).map(m => (
                       <div key={m.id} className="message-bubble incoming">
-                        {/* whatsapp-web.js flags a post's media but gives no URL for it. */}
+                        {/* whatsapp-web.js flags a post's media but gives no URL; ChannelMedia downloads it. */}
                         {m.hasMedia &&
                           (m.mediaUrl ? (
                             <img className="channel-media" src={m.mediaUrl} alt="" />
+                          ) : selectedSessionId ? (
+                            <ChannelMedia sessionId={selectedSessionId} channelId={activeChannel.id} messageId={m.id} />
                           ) : (
                             <span className="status-media-placeholder">{t('chats.status.mediaUnavailable')}</span>
                           ))}

@@ -1,0 +1,48 @@
+import { useEffect, useRef, useState } from 'react';
+import { loadArchivedMedia } from '../../utils/archivedMediaLoad';
+
+export interface MediaBlobState {
+  src: string | null;
+  /** The downloaded blob's MIME type, for callers that do not know the media kind up front. */
+  type: string;
+  error: boolean;
+}
+
+/**
+ * Fetches an authenticated media blob and exposes it as an object URL. `<img src="/api/...">` cannot carry
+ * the X-API-Key header, so the bytes go through sessionApi (which does). The fetches take their turns a gap
+ * apart and a refusal for rate is retried (loadArchivedMedia). The URL is revoked when `key` changes or the
+ * caller unmounts, so browsing a feed does not leak blob memory. `load` is read at fetch time; `key` decides
+ * when to fetch again.
+ */
+export function useMediaBlob(key: string | null, load: (signal: AbortSignal) => Promise<Blob>): MediaBlobState {
+  const [state, setState] = useState<MediaBlobState>({ src: null, type: '', error: false });
+  const loadRef = useRef(load);
+  useEffect(() => {
+    loadRef.current = load;
+  });
+
+  useEffect(() => {
+    if (key === null) return undefined;
+    let objectUrl: string | null = null;
+    let cancelled = false;
+    const controller = new AbortController();
+    setState({ src: null, type: '', error: false });
+    loadArchivedMedia(controller.signal, () => loadRef.current(controller.signal))
+      .then(blob => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setState({ src: objectUrl, type: blob.type, error: false });
+      })
+      .catch(() => {
+        if (!cancelled) setState({ src: null, type: '', error: true });
+      });
+    return () => {
+      cancelled = true;
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [key]);
+
+  return state;
+}
