@@ -210,7 +210,8 @@
       "moveDown": "{{name}} 아래로 이동",
       "removeImage": "{{name}} 제거",
       "uncertainBatch": "전송 중 연결이 끊겼습니다. 게시가 확인된 이미지 {{count}}개를 제거했습니다. 나머지를 보내기 전에 채널을 확인하세요.",
-      "textFailed": "이미지 {{total}}개가 모두 게시되었지만 텍스트 게시물은 실패했습니다."
+      "textFailed": "이미지 {{total}}개가 모두 게시되었지만 텍스트 게시물은 실패했습니다.",
+      "batchDoneElsewhere": "이미지 전송이 끝났습니다: 이미지 {{total}}개가 게시되었습니다."
     },
     "errors": {
       "loadSessions": "세션을 불러오지 못했습니다",

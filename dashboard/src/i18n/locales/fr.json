@@ -215,7 +215,8 @@
       "moveDown": "Descendre {{name}}",
       "removeImage": "Retirer {{name}}",
       "uncertainBatch": "La connexion a échoué en cours d'envoi ; {{count}} images confirmées comme publiées ont été retirées. Vérifiez la chaîne avant d'envoyer le reste.",
-      "textFailed": "Les {{total}} images ont été publiées, mais la publication du texte a échoué."
+      "textFailed": "Les {{total}} images ont été publiées, mais la publication du texte a échoué.",
+      "batchDoneElsewhere": "L'envoi d'images est terminé : {{total}} images ont été publiées."
     },
     "errors": {
       "loadSessions": "Échec du chargement des sessions",

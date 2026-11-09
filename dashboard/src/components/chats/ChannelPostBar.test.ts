@@ -363,3 +363,17 @@ test('when every image went out and only the trailing text failed, it says exact
   assert.equal(trayNames().length, 0);
   assert.equal(input().value, 'fim');
 });
+
+test('a batch that finishes after the operator left the channel still reports it went out', async () => {
+  holdNext = true;
+  nextBody = { mode: 'individual', sent: [0, 1].map(index => ({ index, messageId: `m${index}` })) };
+  const { rerender } = renderBar({ mediaSupported: true });
+  pick(['a.png', 'b.png']);
+  await rtl.waitFor(() => assert.equal(trayNames().length, 2));
+  rtl.fireEvent.click(sendButton());
+  await rtl.waitFor(() => assert.equal(sent.length, 1));
+  // Opening another channel unmounts the bar (the pane is keyed by channel); the providers stay.
+  rerender(wrap(createElement('div')));
+  release!();
+  await rtl.waitFor(() => assert.ok(rtl.screen.getByText('The image batch finished: 2 images were posted.')));
+});

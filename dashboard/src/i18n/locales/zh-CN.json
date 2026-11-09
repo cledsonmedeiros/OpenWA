@@ -210,7 +210,8 @@
       "moveDown": "下移 {{name}}",
       "removeImage": "移除 {{name}}",
       "uncertainBatch": "发送中途连接中断；已移除 {{count}} 张确认已发布的图片。发送其余图片前请先检查频道。",
-      "textFailed": "全部 {{total}} 张图片已发布，但文字帖子发送失败。"
+      "textFailed": "全部 {{total}} 张图片已发布，但文字帖子发送失败。",
+      "batchDoneElsewhere": "图片发送完成：已发布 {{total}} 张图片。"
     },
     "errors": {
       "loadSessions": "加载会话失败",

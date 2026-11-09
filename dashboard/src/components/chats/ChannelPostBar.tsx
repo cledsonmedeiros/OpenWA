@@ -46,7 +46,7 @@ interface PreparedBatch {
 function ChannelPostBar({ sessionId, channelId, mediaSupported = false, progress = null }: ChannelPostBarProps) {
   const { t } = useTranslation();
   const { canWrite } = useRole();
-  const { error: showErrorToast, warning: showWarningToast } = useToast();
+  const { error: showErrorToast, warning: showWarningToast, success: showSuccessToast } = useToast();
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [text, setText] = useState('');
@@ -56,6 +56,15 @@ function ChannelPostBar({ sessionId, channelId, mediaSupported = false, progress
   const [sending, setSending] = useState(false);
   const [activePostId, setActivePostId] = useState<string | null>(null);
   const preparedRef = useRef<PreparedBatch | null>(null);
+  // Opening another channel unmounts this bar mid-batch; the send carries on, and its outcome must still
+  // reach the operator. Failures already do (toasts outlive the bar); a success would pass silently.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   // Indexes the socket confirmed as posted for the batch in flight: what a failed HTTP answer cannot tell.
   const confirmedRef = useRef<Set<number>>(new Set());
   useEffect(() => {
@@ -171,6 +180,7 @@ function ChannelPostBar({ sessionId, channelId, mediaSupported = false, progress
     }
     dropSent(batch.length);
     setText('');
+    if (!mountedRef.current) showSuccessToast(t('chats.channels.batchDoneElsewhere', { total: batch.length }));
   };
 
   const handleSubmit = async (event: FormEvent) => {

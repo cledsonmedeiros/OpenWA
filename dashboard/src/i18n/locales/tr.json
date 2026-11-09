@@ -210,7 +210,8 @@
       "moveDown": "{{name}} aşağı taşı",
       "removeImage": "{{name}} kaldır",
       "uncertainBatch": "Bağlantı gönderim ortasında koptu; gönderildiği doğrulanan {{count}} görsel kaldırıldı. Kalanını göndermeden önce kanalı kontrol edin.",
-      "textFailed": "{{total}} görselin hepsi gönderildi, ancak metin gönderisi başarısız oldu."
+      "textFailed": "{{total}} görselin hepsi gönderildi, ancak metin gönderisi başarısız oldu.",
+      "batchDoneElsewhere": "Görsel gönderimi tamamlandı: {{total}} görsel gönderildi."
     },
     "errors": {
       "loadSessions": "Oturumlar yüklenemedi",
