@@ -28,6 +28,7 @@ import {
 import { useProfilePicture } from '../hooks/useProfilePicture';
 import { useProfilePictures } from '../hooks/useProfilePictures';
 import { useResolvedPhone, resolvedPhoneQuery, isResolvedPhoneHeld } from '../hooks/useResolvedPhone';
+import { keepsSameKey } from '../utils/authLifecycle';
 import { chatTitle, formatPhoneForDisplay } from '../utils/formatPhone';
 import {
   sessionApi,
@@ -78,6 +79,7 @@ import { createTrailingCoalescer } from '../utils/trailingCoalescer';
 import { createReloadCoalescer, type ReloadCoalescer } from '../utils/reloadCoalescer';
 import { copyToClipboard } from '../utils/clipboard';
 import { statusFontStyle } from '../utils/statusFonts';
+import { isComposingKey } from '../utils/composition';
 import MessageBody from '../components/chats/MessageBody';
 import MediaLightbox, { type LightboxItem } from '../components/chats/MediaLightbox';
 import ChatAvatar from '../components/chats/ChatAvatar';
@@ -205,6 +207,8 @@ export function Chats() {
 
   // Chats list
   const [chats, setChats] = useState<Chat[]>([]);
+  // The session whose list `chats` holds, as listedSessionRef below says it, for rendering.
+  const [listedSession, setListedSession] = useState<string>('');
   const [loadingChats, setLoadingChats] = useState<boolean>(false);
   // Why the list on screen is not the session's: its last foreground read failed. A list that could not be read
   // is told apart from one that is empty, which the sidebar alone would render the same way.
@@ -310,6 +314,23 @@ export function Chats() {
   // itself — state, contacts query, submit — is components/chats/StatusComposeModal.
   const [composeOpen, setComposeOpen] = useState<boolean>(false);
 
+  // The session the open chat, channel or status, the status form, the group dialog and the new-chat panel belong to. A
+  // switch closes them while rendering, as menuOpenedFor is cleared: closed by the session effect below, they were
+  // drawn once more with the new session, and the hooks keyed by session asked it about the one left (the chat's
+  // thread, history, picture and phone, the channel's posts, the group's info, the panel's address book). The status
+  // form posts through the session selected, so kept open it sent what was written, and addressed, for one account
+  // through another.
+  const [openViewsSession, setOpenViewsSession] = useState<string>(selectedSessionId);
+  if (openViewsSession !== selectedSessionId) {
+    setOpenViewsSession(selectedSessionId);
+    setActiveChat(null);
+    setActiveChannelId(null);
+    setActiveStatusContactId(null);
+    setComposeOpen(false);
+    setGroupDialogChat(null);
+    setShowNewChat(false);
+  }
+
   const {
     data: messages = [],
     isLoading: loadingMessages,
@@ -328,8 +349,10 @@ export function Chats() {
 
   // The media viewer holds the message it shows by the key the thread merges by (waMessageId ?? id, kept when a refetch
   // swaps a live row for its stored one), never by list position: the image list is rebuilt from the live thread. An
-  // image still being sent is held under its placeholder's temp_ id; the confirmed row that replaces it keeps the
-  // placeholder's createdAt (ChatComposer spreads it), which is how the viewer follows it to its real key.
+  // image still being sent is held under its placeholder's temp_ id, and ChatComposer reports the real key once the
+  // send is confirmed (an echo of the send can restamp the row's createdAt before the page draws it). A viewer
+  // opened on the placeholder after that report finds the confirmed row by the placeholder's createdAt, which the
+  // composer spreads into it.
   const [lightbox, setLightbox] = useState<ViewedImage | null>(null);
 
   const [replyingTo, setReplyingTo] = useState<ChatMessageView | null>(null);
@@ -386,6 +409,13 @@ export function Chats() {
     setMessageInput(draftsRef.current.get(key) ?? '');
     draftsRef.current.delete(key);
   }, [selectedSessionId, openChatId, messageInput]);
+  // A refused send gives back the text it took from the field, as the draft of its thread, unless something was typed
+  // there since: its failed bubble lasts only until the thread is read again, and then the text was nowhere.
+  const restoreRefusedDraft = useCallback((sessionId: string, chatId: string, text: string) => {
+    const key = readKey(sessionId, chatId);
+    if (draftKeyRef.current === key) setMessageInput(current => (current === '' ? text : current));
+    else if (!draftsRef.current.get(key)) draftsRef.current.set(key, text);
+  }, []);
 
   // Per-chat scroll-position memory + auto-scroll heuristic.
   // Pass `messages.length > 0` as the loaded signal: it stays stable once the
@@ -413,8 +443,12 @@ export function Chats() {
 
   // Batch profile-picture fetch for the visible chat list — ONE request for the whole sidebar
   // (per-row queries burst the per-IP throttle into 429s). Sorted-key cached 1h; rows fall back
-  // to the generic icon for ids that resolve null.
-  const chatIds = useMemo(() => chats.map(c => c.id), [chats]);
+  // to the generic icon for ids that resolve null. A list a switch leaves on screen is the account left, whose chats
+  // the session switched to is not asked about.
+  const chatIds = useMemo(
+    () => (listedSession === selectedSessionId ? chats.map(c => c.id) : []),
+    [chats, listedSession, selectedSessionId],
+  );
   const listPics = useProfilePictures(selectedSessionId || undefined, chatIds);
 
   // Profile-picture fetch for the active room (cached 1h by useProfilePicture; TanStack Query
@@ -522,8 +556,8 @@ export function Chats() {
   // holds the chat and would bring it back; one asked for after it is as good as the engine's own answer.
   const deletedRowsRef = useRef(new Map<string, number>());
   // A chat this page has read shows nothing unread, and a reload asked for before the read keeps it so. That also
-  // replaces a Mark as unread still remembered for the chat, which the read has undone. A session switch leaves the
-  // open chat the previous account's for one render, and that account's row must not be remembered for this one.
+  // replaces a Mark as unread still remembered for the chat, which the read has undone. Until a switch's list lands, the
+  // list on screen is the previous account's, and a row of it must not be remembered for this one.
   const markRowRead = useCallback(
     (chatId: string) => {
       if (listedSessionRef.current !== selectedSessionId) return;
@@ -577,6 +611,7 @@ export function Chats() {
         const listed = data.filter(c => !gone.has(c.id));
         const merge = background && listedSessionRef.current === sessionId;
         listedSessionRef.current = sessionId;
+        setListedSession(sessionId);
         setChats(prev => {
           const live = new Map(merge ? prev.map(c => [c.id, c] as const) : []);
           const fetchedIds = new Set(listed.map(c => c.id));
@@ -598,6 +633,7 @@ export function Chats() {
         if (background) return false;
         setChatsFailure(err instanceof Error ? err.message : '');
         listedSessionRef.current = sessionId;
+        setListedSession(sessionId);
         setChats([]);
         return false;
       } finally {
@@ -648,9 +684,6 @@ export function Chats() {
     // A session deleted while it was open leaves none selected when no other is ready: what belonged to it is
     // cleared all the same, with no list to load in its place.
     if (selectedSessionId) void loadChats(selectedSessionId);
-    setActiveChat(null);
-    setActiveChannelId(null);
-    setActiveStatusContactId(null);
     // A staged attachment or reply belongs to a chat in the session being left, so it is dropped here
     // rather than carried across — the close/reopen round trip that preserves it is scoped to a
     // single session. Clearing previewUrl runs the revoke effect's cleanup; the composer
@@ -659,10 +692,8 @@ export function Chats() {
     setPreviewUrl(null);
     setReplyingTo(null);
     lastRoomIdRef.current = null;
-    // The new-chat panel lists the address book of the session being left, and an open group dialog
-    // edits a group through it.
+    // The new-chat panel lists the address book of the session being left.
     setShowNewChat(false);
-    setGroupDialogChat(null);
     setConfirmAction(null);
     setMuteDialogChat(null);
     setContactDialogChat(null);
@@ -744,9 +775,8 @@ export function Chats() {
   );
 
   // Marking a chat read is an operator write; a read-only key would only collect 403 toasts.
-  // A session switch rebuilds the coalescer for the new session one render before the open chat is
-  // cleared, so until the new session's list is on screen the open chat is still the previous
-  // account's and nothing is marked read.
+  // A session switch rebuilds the coalescer for the new session, and until that session's list is on
+  // screen the list is still the previous account's, so nothing is marked read.
   const markChatRead = useCallback(
     (chatId: string) => {
       if (keptUnread.has(readKey(selectedSessionId, chatId))) return;
@@ -759,9 +789,12 @@ export function Chats() {
   // Synced in a layout effect: a socket frame handled after the list commits but before passive
   // effects flush would otherwise see the previous list, miss the chat and refetch the whole list.
   const chatsRef = useRef(chats);
+  // The session whose rows chatsRef holds: listedSessionRef moves as soon as a list answers, a render before the rows do.
+  const chatsOwnerRef = useRef('');
   const activeChatIdRef = useRef<string | undefined>(undefined);
   useLayoutEffect(() => {
     chatsRef.current = chats;
+    chatsOwnerRef.current = listedSession;
     activeChatIdRef.current = activeChat?.id;
     selectedSessionRef.current = selectedSessionId;
   });
@@ -1341,10 +1374,19 @@ export function Chats() {
 
   // The number check answers a phone id, while a contact that moved to privacy-id addressing keeps its conversation
   // under its @lid. Finds the id the list holds that conversation under: the same phone spelled another way, else
-  // the @lid chat the engine resolves to that phone. The engine's answers share the room header's cache.
+  // the @lid chat the engine resolves to that phone. The engine's answers share the room header's cache. The search
+  // ends, with no further request, once the key or the session changes or the caller no longer wants the answer.
   const findListedChat = useCallback(
-    async (phoneId: string): Promise<string | null> => {
+    async (phoneId: string, isWanted: () => boolean = () => true): Promise<string | null> => {
       const sessionId = selectedSessionRef.current;
+      const sameKey = keepsSameKey();
+      const isCurrent = () =>
+        sameKey() &&
+        selectedSessionRef.current === sessionId &&
+        listedSessionRef.current === sessionId &&
+        chatsOwnerRef.current === sessionId &&
+        isWanted();
+      if (!isCurrent()) return null;
       const spelled = chatsRef.current.find(c => contactKey(c.id) === contactKey(phoneId));
       if (spelled) return spelled.id;
       const phone = phoneId.split('@')[0].replace(/\D/g, '');
@@ -1353,18 +1395,19 @@ export function Chats() {
         .slice(0, LID_CHATS_SEARCHED);
       let lastAskedAt = 0;
       for (let i = 0; i < privacyChats.length; i += LID_LOOKUPS_AT_ONCE) {
+        if (!isCurrent()) return null;
         const batch = privacyChats.slice(i, i + LID_LOOKUPS_AT_ONCE);
         // A group the page already holds answers for goes ahead at once; only one that reaches the gateway waits.
         if (batch.some(c => !isResolvedPhoneHeld(queryClient, sessionId, c.id))) {
           const wait = lastAskedAt + LID_LOOKUP_GAP_MS - Date.now();
           if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
-          if (selectedSessionRef.current !== sessionId) return null;
+          if (!isCurrent()) return null;
           lastAskedAt = Date.now();
         }
         const phones = await Promise.all(
           batch.map(c => queryClient.fetchQuery(resolvedPhoneQuery(sessionId, c.id)).catch(() => null)),
         );
-        if (selectedSessionRef.current !== sessionId) return null;
+        if (!isCurrent()) return null;
         const hit = batch.find((_, j) => phones[j]?.replace(/\D/g, '') === phone);
         if (hit) return hit.id;
       }
@@ -1390,15 +1433,32 @@ export function Chats() {
   // Bumped with every hit, so a hit in the chat already open still re-runs the scroll effect, where
   // every other state it sets is unchanged and React skips the render.
   const [hitSeq, setHitSeq] = useState(0);
+  // The click being handled: a newer hit replaces it, so a hit that waited for the session list can tell it was overtaken.
+  const hitClickRef = useRef<object | null>(null);
+  // Moves whenever another session or chat is chosen. A continuation of a hit that began before can tell it was overtaken,
+  // also when the choice came back to where it began: the ids alone would then look as if nothing had happened.
+  const hitContextRef = useRef(0);
+  useLayoutEffect(() => {
+    hitContextRef.current += 1;
+  }, [selectedSessionId, activeChat?.id]);
+  // A hit still looking up its chat when the page is left has nothing to open it in: ending it also ends its lookup, and
+  // the continuation of a click that waited for the session list says nothing on the page that replaced this one.
+  useEffect(
+    () => () => {
+      pendingHitRef.current = null;
+      hitClickRef.current = null;
+    },
+    [],
+  );
 
   // The listed chat a hit was found in. A stored row keeps the chat id it was written with, which can be another
   // spelling of a listed chat: an API send to the raw `@s.whatsapp.net` form, or to the phone of a contact the list
   // holds under its @lid. The thread read takes those as one chat, and so does this.
   const findHitChat = useCallback(
-    async (chatId: string): Promise<Chat | undefined> => {
+    async (chatId: string, isWanted?: () => boolean): Promise<Chat | undefined> => {
       const listed = chatsRef.current.find(c => c.id === chatId);
       if (listed || !phoneContactId(chatId)) return listed;
-      const id = await findListedChat(chatId).catch(() => null);
+      const id = await findListedChat(chatId, isWanted).catch(() => null);
       return id === null ? undefined : chatsRef.current.find(c => c.id === id);
     },
     [findListedChat],
@@ -1440,6 +1500,14 @@ export function Chats() {
 
   const handleSearchHit = useCallback(
     async (hit: SearchHit) => {
+      // A newer hit, another session or another chat chosen while the session list is read takes over from this click.
+      const click = {};
+      hitClickRef.current = click;
+      // The hit before it is over, wherever its own lookup has got: it must not open a room that this click would then
+      // take for the user's own choice.
+      pendingHitRef.current = null;
+      const contextAtClick = hitContextRef.current;
+      const overtaken = () => hitClickRef.current !== click || hitContextRef.current !== contextAtClick;
       // Search covers stored messages of every session, but the page can only open a ready one, and
       // its list is read on mount. A session missing from it is looked up again, since it may have
       // connected since; one that still is not ready is refused rather than selected with no chats.
@@ -1448,9 +1516,10 @@ export function Chats() {
         try {
           listed = await readSessions();
         } catch (err) {
-          showLoadError('chats.errors.loadSessions', err);
+          if (!overtaken()) showLoadError('chats.errors.loadSessions', err);
           return;
         }
+        if (overtaken()) return;
         if (!listed.some(s => s.id === hit.sessionId && s.status === 'ready')) {
           pendingHitRef.current = null;
           showWarningToast(t('chats.errors.searchHitSessionNotReady'));
@@ -1481,9 +1550,22 @@ export function Chats() {
       }
       if (!listReady) return;
       const openBefore = activeChatIdRef.current;
-      const chat = await findHitChat(hit.chatId);
-      // A newer hit, a session switch, or a chat the user opened while the lookup ran takes over from this one.
-      if (pendingHitRef.current !== pending || activeChatIdRef.current !== openBefore) return;
+      const contextBefore = hitContextRef.current;
+      // The lookup asks the gateway for the phones of privacy-id chats, so it ends, with no further request, as soon as the
+      // answer would be dropped below.
+      const chat = await findHitChat(
+        hit.chatId,
+        () => pendingHitRef.current === pending && hitContextRef.current === contextBefore,
+      );
+      // A newer hit, a session switch, or a chat the user opened while the lookup ran takes over from this one, also when
+      // a room was opened and closed again and the open chat is what it was.
+      if (
+        pendingHitRef.current !== pending ||
+        activeChatIdRef.current !== openBefore ||
+        hitContextRef.current !== contextBefore
+      ) {
+        return;
+      }
       openHitChat(pending, chat);
     },
     [
@@ -1522,8 +1604,18 @@ export function Chats() {
     const resolving = { ...pending, resolving: true };
     pendingHitRef.current = resolving;
     const openBefore = activeChatIdRef.current;
-    void findHitChat(pending.chatId).then(chat => {
-      if (pendingHitRef.current !== resolving || activeChatIdRef.current !== openBefore) return;
+    const contextBefore = hitContextRef.current;
+    void findHitChat(
+      pending.chatId,
+      () => pendingHitRef.current === resolving && hitContextRef.current === contextBefore,
+    ).then(chat => {
+      if (
+        pendingHitRef.current !== resolving ||
+        activeChatIdRef.current !== openBefore ||
+        hitContextRef.current !== contextBefore
+      ) {
+        return;
+      }
       openHitChat(pending, chat);
     });
   }, [chats, loadingChats, chatsFailure, activeChat, selectedSessionId, findHitChat, openHitChat]);
@@ -1531,8 +1623,8 @@ export function Chats() {
   // Best-effort scroll to the hit message. Runs as a layout effect (after useChatScrollPosition's
   // own restore on the same commit) so it overrides the bottom/saved jump with no visible flash.
   // Degrades silently to session+chat selection when the element isn't present — the message is
-  // still visible in the conversation. Until the hit's session has its list on screen, the open chat
-  // still belongs to the session being left, even when it has the hit's chat id.
+  // still visible in the conversation. Until the hit's session has its list on screen, a chat open
+  // under the hit's chat id is not the one the hit opened.
   useLayoutEffect(() => {
     const pending = pendingHitRef.current;
     if (!pending || listedSessionRef.current !== pending.sessionId || activeChat?.id !== pending.chatId) return;
@@ -1622,11 +1714,15 @@ export function Chats() {
   // it is added to the sidebar locally until the first message, or the next list load, settles it.
   // The filter and search are cleared so the opened chat is visible in the list. A chat the panel found
   // through another session (a lookup that answered after a switch) is dropped: opening it here would
-  // send the next message through the wrong account.
+  // send the next message through the wrong account. Until the selected session's own list has committed the rows
+  // are still the previous session's, so the chat opens without being read from or added to them. A lookup that was
+  // pending when the list committed calls the handler of the render it began in: the rows are read from the ref that
+  // is paired with their owner, never from that render's `chats`.
   const handleOpenNewChat = (chat: Chat, sessionId: string) => {
     if (sessionId !== selectedSessionRef.current) return;
-    const existing = chats.find(c => c.id === chat.id);
-    if (!existing) setChats(prev => [chat, ...prev]);
+    const listed = chatsOwnerRef.current === sessionId;
+    const existing = listed ? chatsRef.current.find(c => c.id === chat.id) : undefined;
+    if (listed && !existing) setChats(prev => (prev.some(c => c.id === chat.id) ? prev : [chat, ...prev]));
     setActiveTab('chats');
     setActiveChannelId(null);
     setActiveStatusContactId(null);
@@ -1885,7 +1981,7 @@ export function Chats() {
       if (!roomMenuRef.current?.contains(event.target as Node)) setRoomMenuOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented) return;
+      if (event.key !== 'Escape' || isComposingKey(event) || event.defaultPrevented) return;
       event.preventDefault();
       closeRoomMenu();
     };
@@ -1906,19 +2002,51 @@ export function Chats() {
     ? (groupedStatuses.find(g => g.contact.id === activeStatusContactId) ?? null)
     : null;
 
+  const chatPageRef = useRef<HTMLDivElement>(null);
+  const previousViewRef = useRef<{ id: string | null; newChat: boolean; sessionId: string } | null>(null);
+  const viewId = activeChat?.id ?? activeChannel?.id ?? activeStatusGroup?.contact.id ?? null;
+  useLayoutEffect(() => {
+    const previous = previousViewRef.current;
+    previousViewRef.current = { id: viewId, newChat: showNewChat, sessionId: selectedSessionId };
+    if (!previous || previous.sessionId !== selectedSessionId || showNewChat) return;
+    const closed = previous.newChat ? previous.id === viewId : previous.id !== null && viewId === null;
+    if (!closed) return;
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    const sidebar = chatPageRef.current?.querySelector('.chats-sidebar');
+    const target = previous.newChat
+      ? sidebar?.querySelector<HTMLElement>('[data-new-chat]')
+      : Array.from(sidebar?.querySelectorAll<HTMLElement>('[data-chat-id]') ?? []).find(
+          row => row.dataset.chatId === previous.id,
+        );
+    if (!target) {
+      sidebar?.querySelector<HTMLInputElement>('.chat-search-input input')?.focus({ preventScroll: true });
+      return;
+    }
+    const list = target.closest('.chats-list');
+    const rowRect = target.getBoundingClientRect();
+    const listRect = list?.getBoundingClientRect();
+    const visible = !listRect || (rowRect.top >= listRect.top && rowRect.bottom <= listRect.bottom);
+    // Focusing a row that is off screen scrolls it to the middle of the list, so align it to the nearest edge first.
+    if (!visible) target.scrollIntoView({ block: 'nearest' });
+    target.focus({ preventScroll: visible });
+  }, [viewId, showNewChat, selectedSessionId]);
+
   // The pane heading truncates with an ellipsis, so the untruncated text has to reach the tooltip.
   const activeStatusTitle = activeStatusGroup
     ? (activeStatusGroup.contact.name ?? activeStatusGroup.contact.pushName ?? activeStatusGroup.contact.id)
     : '';
 
-  // Same open-at-newest behavior for the status viewer pane, keyed off the active contact and its
-  // item list. Declared after activeStatusGroup: the viewer follows refetches because the deps are
-  // the derived group's items, not a click-time snapshot.
+  // Same open-at-newest behavior for the status viewer pane, keyed off the active contact and the
+  // ids of its items. Declared after activeStatusGroup: the viewer follows refetches because the deps
+  // are the derived group's, not a click-time snapshot. The ids, not the item list, which is grouped
+  // anew on every render of the page and moved a reader who had scrolled up on any live message.
   const statusFeedRef = useRef<HTMLDivElement | null>(null);
+  const activeStatusItemIds = activeStatusGroup?.items.map(item => item.id).join(',');
   useEffect(() => {
     const el = statusFeedRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [activeStatusGroup?.contact.id, activeStatusGroup?.items]);
+  }, [activeStatusGroup?.contact.id, activeStatusItemIds]);
 
   // Escape closes the open view and returns to the list. Anything that owns the key already keeps
   // it: a modal (Modal renders role="dialog" only while open) and the language menu (role="menu")
@@ -1927,7 +2055,7 @@ export function Chats() {
   // still being committed by an IME, is left alone for the same reason.
   useEffect(() => {
     const closeOpenViewOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
+      if (event.key !== 'Escape' || event.defaultPrevented || isComposingKey(event)) return;
       if (document.querySelector('[role="dialog"], [role="menu"]')) return;
       if (activeStatusContactId !== null) setActiveStatusContactId(null);
       else if (activeChannel) setActiveChannelId(null);
@@ -1979,7 +2107,7 @@ export function Chats() {
   }, [lightbox, lightboxIndex, imageMessages]);
 
   return (
-    <div className="chats-page">
+    <div className="chats-page" ref={chatPageRef}>
       {/* The page header gave way to the full-height layout; its title stays for screen readers. */}
       <h1 className="visually-hidden">{t('nav.chats')}</h1>
       {/* Real-time connection permanently dropped — let the user re-establish it instead of
@@ -2230,6 +2358,8 @@ export function Chats() {
                   setReplyingTo={setReplyingTo}
                   onMessageAppended={onMessageAppended}
                   onSent={promoteSentChat}
+                  onSendConfirmed={(tempId, key) => setLightbox(v => (v?.key === tempId ? { ...v, key } : v))}
+                  onSendFailed={restoreRefusedDraft}
                   messageInput={messageInput}
                   setMessageInput={setMessageInput}
                   attachment={attachment}

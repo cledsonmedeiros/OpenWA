@@ -26,8 +26,9 @@ import { useToast } from '../hooks/useToast';
 import { useRole } from '../hooks/useRole';
 import { batchStopMessage, useNumberCheck, type CheckResultItem } from '../hooks/useNumberCheck';
 import { escapeCsvCell } from '../utils/csv';
-import { normalizePhoneText } from '../utils/phone';
+import { normalizePhoneDigits, normalizePhoneText } from '../utils/phone';
 import { keepsSameKey } from '../utils/authLifecycle';
+import { isComposingKey } from '../utils/composition';
 import './NumberChecker.css';
 
 // Every lookup is an outbound WhatsApp query that counts against the gateway's per-IP limit on this route
@@ -53,7 +54,9 @@ export function NumberChecker() {
   const batchProgress = run.progress;
   const batchStop = run.stopped;
 
-  const { data: sessions = [], isLoading: loadingSessions } = useSessionsQuery();
+  const { data: sessions = [], isLoading: loadingSessions, error: sessionsError } = useSessionsQuery();
+  // A read that never produced a list is not "no session connected"; a failed refetch keeps the cached one.
+  const sessionsFailed = !!sessionsError && sessions.length === 0;
   const readySessions = useMemo(() => sessions.filter(s => s.status === 'ready'), [sessions]);
 
   const [selectedSession, setSelectedSession] = useState<string>('');
@@ -69,6 +72,7 @@ export function NumberChecker() {
 
   // Single Check State
   const [phoneNumber, setPhoneNumber] = useState('');
+  const singlePhoneRef = useRef<HTMLInputElement>(null);
   const [isCheckingSingle, setIsCheckingSingle] = useState(false);
   const [singleResult, setSingleResult] = useState<CheckResultItem | null>(null);
   const [copiedId, setCopiedId] = useState(false);
@@ -100,9 +104,7 @@ export function NumberChecker() {
       let digits = raw.replace(/[^0-9]/g, '');
       const isInternational = raw.trim().startsWith('+') || digits.startsWith('00');
       // 1. If international dial exit code 00 is present (e.g. 009196...), strip '00'
-      if (digits.startsWith('00') && digits.length >= 12) {
-        digits = digits.substring(2);
-      }
+      digits = normalizePhoneDigits(digits);
       // 2. If user entered +91 with domestic trunk 0 (e.g. +91 096... -> 13 digits), strip trunk 0
       if (applyPrefix && digits.length === 13 && digits.startsWith('910')) {
         digits = '91' + digits.substring(3);
@@ -151,7 +153,7 @@ export function NumberChecker() {
       }
       let d = raw.replace(/[^0-9]/g, '');
       const isInternational = raw.startsWith('+') || d.startsWith('00');
-      if (d.startsWith('00') && d.length >= 12) d = d.substring(2);
+      d = normalizePhoneDigits(d);
       if (autoPrefix91 && d.length === 13 && d.startsWith('910')) d = '91' + d.substring(3);
       if (autoPrefix91 && !isInternational && d.length === 11 && d.startsWith('0')) d = d.substring(1);
 
@@ -231,7 +233,12 @@ export function NumberChecker() {
         err instanceof Error ? err.message : t('numberChecker.toast.unknownError'),
       );
     } finally {
-      if (singleRun.current === request) setIsCheckingSingle(false);
+      if (singleRun.current === request) {
+        setIsCheckingSingle(false);
+        if (isCurrent() && (document.activeElement === null || document.activeElement === document.body)) {
+          singlePhoneRef.current?.focus({ preventScroll: true });
+        }
+      }
     }
   };
 
@@ -309,8 +316,17 @@ export function NumberChecker() {
         }
       />
 
+      {sessionsFailed && (
+        <div className="error-banner" role="alert">
+          <AlertCircle size={20} />
+          <span className="error-banner-text">
+            {t('dashboard.loadError')}: {sessionsError.message}
+          </span>
+        </div>
+      )}
+
       {/* Session Alert if none ready */}
-      {!loadingSessions && readySessions.length === 0 && (
+      {!loadingSessions && !sessionsFailed && readySessions.length === 0 && (
         <div className="nc-alert warning">
           <div className="nc-alert-icon">
             <AlertCircle size={22} />
@@ -383,6 +399,7 @@ export function NumberChecker() {
                 </label>
                 <div className="nc-input-row">
                   <input
+                    ref={singlePhoneRef}
                     id="nc-single-phone"
                     type="text"
                     dir="ltr"
@@ -391,9 +408,9 @@ export function NumberChecker() {
                     value={phoneNumber}
                     onChange={e => setPhoneNumber(e.target.value)}
                     onKeyDown={e => {
-                      if (e.key === 'Enter') handleSingleCheck();
+                      if (e.key === 'Enter' && !isComposingKey(e.nativeEvent)) handleSingleCheck();
                     }}
-                    disabled={isCheckingSingle}
+                    readOnly={isCheckingSingle}
                   />
                   <button
                     className="nc-btn nc-btn-primary"

@@ -29,6 +29,7 @@ import { useTheme } from '../hooks/useTheme';
 import { useRole, type UserRole } from '../hooks/useRole';
 import { languageOptions, resolveSupportedLanguage, rtlLanguages, type SupportedLanguage } from '../i18n';
 import { healthApi, infraApi } from '../services/api';
+import { isComposingKey } from '../utils/composition';
 import './Layout.css';
 
 interface LayoutProps {
@@ -93,7 +94,9 @@ export function Layout({ onLogout, userRole }: LayoutProps) {
   const [update, setUpdate] = useState<{ latest: string; url: string } | null>(null);
   const [isLanguageMenuOpen, setIsLanguageMenuOpen] = useState(false);
   const languageMenuRef = useRef<HTMLDivElement>(null);
+  const languageButtonRef = useRef<HTMLButtonElement>(null);
   const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
+  const mainRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     const phone = window.matchMedia(MOBILE_QUERY);
@@ -143,10 +146,17 @@ export function Layout({ onLogout, userRole }: LayoutProps) {
   };
 
   useEffect(() => {
-    document.body.style.overflow = isMobileOpen ? 'hidden' : '';
-    return () => {
-      document.body.style.overflow = '';
+    if (!isMobileOpen || !mainRef.current) return;
+    const main = mainRef.current;
+    const closeForDialog = () => {
+      if (!main.querySelector('[role="dialog"]')) return;
+      setIsMobileOpen(false);
+      mobileMenuButtonRef.current?.focus();
     };
+    const observer = new MutationObserver(closeForDialog);
+    observer.observe(main, { childList: true, subtree: true });
+    closeForDialog();
+    return () => observer.disconnect();
   }, [isMobileOpen]);
 
   // Escape dismisses the innermost overlay: while the language menu is open it takes the key, then the drawer does.
@@ -157,7 +167,7 @@ export function Layout({ onLogout, userRole }: LayoutProps) {
     if (!isMobileOpen || isLanguageMenuOpen) return;
 
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.isComposing) return;
+      if (event.key !== 'Escape' || isComposingKey(event)) return;
       if (document.querySelector('[role="dialog"]')) return;
       event.preventDefault();
       event.stopPropagation();
@@ -179,7 +189,10 @@ export function Layout({ onLogout, userRole }: LayoutProps) {
       }
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setIsLanguageMenuOpen(false);
+      if (event.key !== 'Escape') return;
+      setIsLanguageMenuOpen(false);
+      // The focused item goes with the menu, so focus returns to the button that opened it.
+      if (languageMenuRef.current?.contains(document.activeElement)) languageButtonRef.current?.focus();
     };
 
     document.addEventListener('mousedown', closeOnOutsideClick);
@@ -198,6 +211,7 @@ export function Layout({ onLogout, userRole }: LayoutProps) {
   const languageButtonName = t('common.joinedName', { first: languageLabel, second: t('common.changeLanguage') });
   const changeLanguage = (language: SupportedLanguage) => {
     setIsLanguageMenuOpen(false);
+    languageButtonRef.current?.focus();
     void i18n.changeLanguage(language);
   };
   const isRtl = rtlLanguages.includes(currentLang);
@@ -295,6 +309,7 @@ export function Layout({ onLogout, userRole }: LayoutProps) {
         <div className="sidebar-footer">
           <div className="language-menu" ref={languageMenuRef}>
             <button
+              ref={languageButtonRef}
               className="theme-toggle-btn"
               onClick={() => setIsLanguageMenuOpen(open => !open)}
               title={languageButtonName}
@@ -341,7 +356,12 @@ export function Layout({ onLogout, userRole }: LayoutProps) {
         </div>
       </aside>
 
-      <main className={`main-content ${collapsed ? 'expanded' : ''} ${isMobile ? 'mobile' : ''}`}>
+      {/* The open drawer covers the page, so the page leaves the tab and reading order until it closes. */}
+      <main
+        ref={mainRef}
+        className={`main-content ${collapsed ? 'expanded' : ''} ${isMobile ? 'mobile' : ''}`}
+        inert={isMobile && isMobileOpen}
+      >
         <Outlet />
       </main>
     </div>

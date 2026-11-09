@@ -619,6 +619,7 @@
     "session": "Sesi",
     "events": "Kejadian",
     "noEvents": "Pilih minimal satu kejadian.",
+    "urlInvalid": "Gunakan alamat http:// atau https:// lengkap, seperti https://example.com/webhook.",
     "available": "Kejadian Tersedia",
     "saveChanges": "Simpan Perubahan",
     "filters": {
@@ -808,7 +809,7 @@
     "roles": {
       "admin": "Admin",
       "operator": "Operator",
-      "viewer": "Viewer"
+      "viewer": "Pelihat"
     },
     "roleDescriptions": {
       "admin": "Akses penuh ke semua sumber daya",
@@ -1233,8 +1234,8 @@
       "storagePath": "Path Penyimpanan",
       "bucket": "Nama Bucket",
       "region": "Region",
-      "accessKey": "Access Key",
-      "secretKey": "Secret Key",
+      "accessKey": "Kunci Akses",
+      "secretKey": "Kunci Rahasia",
       "endpoint": "Endpoint Kustom (opsional)",
       "endpointHint": "Untuk MinIO atau layanan kompatibel S3 lainnya"
     },

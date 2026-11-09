@@ -31,6 +31,7 @@ import {
   MessageListResponseDto,
   ChatHistoryMessageDto,
   MessageReactionDto,
+  MessageReceiptsResponseDto,
 } from './dto/message-responses.dto';
 import {
   SendLocationDto,
@@ -526,7 +527,9 @@ export class MessageController {
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiResponse({
     status: 201,
-    description: 'Message forwarded',
+    description:
+      "Message forwarded. `messageId` is the forwarded copy's id, or an empty string when the engine could not " +
+      'read it back.',
     type: MessageResponseDto,
   })
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
@@ -730,6 +733,49 @@ export class MessageController {
     @Param('messageId') messageId: string,
   ) {
     return this.messageService.getMessageReactions(sessionId, chatId, messageId);
+  }
+
+  @ChatScoped('fenced')
+  @Get(':chatId/:messageId/receipts')
+  @ApiOperation({ summary: 'Get delivery and read receipts for a specific message' })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiParam({ name: 'chatId', description: 'Chat ID containing the message' })
+  @ApiParam({
+    name: 'messageId',
+    description: 'Full serialized ID of a message this account sent, as the send routes return it',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Message delivery and read receipts with timestamps',
+    type: MessageReceiptsResponseDto,
+  })
+  @ApiResponse({ status: 400, description: 'Session not active' })
+  @ApiResponse({
+    status: 403,
+    description:
+      'The message was received, not sent by this account (only its own messages carry receipts), or the ' +
+      "API key's role, session or chat scope, or IP allow-list does not allow this operation.",
+  })
+  @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })
+  @ApiResponse({
+    status: 404,
+    description:
+      'No such message in this chat: the id is not a full serialized message id, WhatsApp Web no longer ' +
+      'holds the message, or the message belongs to another chat.',
+  })
+  @ApiResponse({ status: 501, description: ENGINE_NOT_SUPPORTED_501 })
+  @ApiResponse({
+    status: 503,
+    description:
+      'The whatsapp-web.js page connection died mid-read, so nothing could be read. Retry once the ' +
+      'session is ready again.',
+  })
+  async getReceipts(
+    @Param('sessionId') sessionId: string,
+    @Param('chatId') chatId: string,
+    @Param('messageId') messageId: string,
+  ) {
+    return this.messageService.getMessageReceipts(sessionId, chatId, messageId);
   }
 
   // Three path segments, so it never collides with `:chatId/history` (two) regardless of
@@ -937,7 +983,9 @@ export class MessageController {
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiResponse({
     status: 200,
-    description: 'Message edited',
+    description:
+      'Message edited. Both fields describe the edited message, not the edit: `messageId` is its id and ' +
+      '`timestamp` the time it was originally sent.',
     type: MessageResponseDto,
   })
   @ApiResponse({
@@ -947,9 +995,9 @@ export class MessageController {
   @ApiResponse({
     status: 403,
     description:
-      'The engine refused the edit. The Baileys adapter refuses a message the account did not send; ' +
-      'whatsapp-web.js reads the refusal from the page, which also covers a message that is not text. ' +
-      'Past its own guard the Baileys engine has no acceptance signal and answers 200.',
+      'The engine refused the edit. Both engines refuse a message the account did not send and one with no ' +
+      'text or caption to edit (a location, sticker, poll, contact card or audio); whatsapp-web.js reads the ' +
+      'refusal from the page. Past its own guards the Baileys engine has no acceptance signal and answers 200.',
   })
   @ApiResponse({ status: 404, description: 'Message not found' })
   @ApiResponse({ status: 409, description: ENGINE_NOT_READY_409 })

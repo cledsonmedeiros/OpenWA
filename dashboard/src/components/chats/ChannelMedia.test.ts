@@ -79,3 +79,23 @@ test('a download that fails keeps the unavailable placeholder', async () => {
     restore();
   }
 });
+
+// Logout cancels nothing in flight: a download that lands after the stored key changed must not show its
+// media, nor retry a refusal under the new key (keepsSameKey).
+test('a download that lands after the key changed shows nothing and is not retried', async () => {
+  window.sessionStorage.setItem('openwa_api_key', 'k1');
+  let calls = 0;
+  const { container, restore } = await renderWith(() => {
+    calls += 1;
+    window.sessionStorage.setItem('openwa_api_key', 'k2');
+    return Promise.reject(Object.assign(new Error('Too Many Requests'), { status: 429 }));
+  });
+  try {
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    assert.equal(calls, 1);
+    assert.equal(container.querySelector('img, video, audio, .status-media-placeholder'), null);
+  } finally {
+    restore();
+    window.sessionStorage.removeItem('openwa_api_key');
+  }
+});

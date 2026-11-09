@@ -10,7 +10,10 @@ import type { AnyToolDescriptor } from './tool-descriptor';
  * auth (role + allowedSessions + IP fail-closed) → chat gate (a chat-restricted key may run only a
  * tool that carries a `chatScope` mark) → validate input → NUL check → chat arguments and
  * `quotedMessageId` → handler.
- * Mirrors the REST guard-then-pipe order (auth before validation). The chat arguments are checked
+ * Mirrors the REST guard-then-pipe order (auth before validation) for a call that reaches it. Over MCP
+ * the SDK validates the same input schema before invoking this, so arguments the schema refuses come
+ * back as the SDK's -32602 tool error without reaching auth; every handler still runs only after the
+ * role, session and chat checks here. The chat arguments are checked
  * on the parsed values, so schema normalization cannot change the authorized target.
  * `clientIp` is undefined over MCP — a key with allowedIps therefore fails closed
  * inside validateApiKey (documented limitation).
@@ -94,12 +97,14 @@ export async function invokeTool(
       if (typeof tool.chatScope !== 'string') {
         const fields = tool.chatScope ?? [];
         if (fields.length === 0) throw new ForbiddenException('API key is restricted to selected chats');
+        // The allowlist is the same for every field, so it is compiled once.
+        const scope = chatScope.scopeFor(apiKey);
         for (const field of fields) {
           const chatId = values[field];
           if (typeof chatId !== 'string' || !chatId.trim()) {
             throw new ForbiddenException(`${field} is required for a key restricted to selected chats`);
           }
-          if (!(await chatScope.allows(apiKey, chatId))) {
+          if (!(await chatScope.allows(apiKey, chatId, scope))) {
             throw new ForbiddenException('API key not authorized for this chat');
           }
         }

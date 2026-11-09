@@ -1445,6 +1445,31 @@ test('an open session deleted with no status frame gives way once the page is sh
   assert.equal(container.querySelector('.room-header') === null, true, "the deleted session's chat stayed open");
 });
 
+test('an open session deleted with its group dialog up asks the next session nothing about that group', async () => {
+  const { screen, waitFor, act } = rtl;
+  listSecond = true;
+  listGroup = true;
+  const { container } = renderPage();
+  await openGroupInfo();
+  const before = fetchCalls.length;
+
+  mainDeleted = true;
+  act(() => void document.dispatchEvent(new window.Event('visibilitychange')));
+  await waitFor(() => assert.equal(selectedSessionName(container), SECOND_SESSION.name));
+  await settle();
+  assert.equal(screen.queryByRole('dialog') === null, true, "the deleted session's group dialog stayed open");
+  const group = encodeURIComponent(GROUP.id);
+  const asked = fetchCalls
+    .slice(before)
+    .map(c => c.path)
+    .filter(
+      path =>
+        path.startsWith(`/api/sessions/${SECOND_SESSION.id}/`) &&
+        (path.includes(`/groups/${group}`) || path.includes(`/contacts/${group}/`)),
+    );
+  assert.deepEqual(asked, [], 'the next session was asked about the group the dialog had open');
+});
+
 test('the session list read at load does not undo a newer list a status frame read before it answered', async () => {
   const { screen, fireEvent, waitFor } = rtl;
   listOffline = true;
@@ -3010,6 +3035,17 @@ test("a row's menu closes on a press outside it and stays open for a press insid
   assert.ok(!container.querySelector('.chat-row-menu-popover'), 'a press outside left the menu open');
 });
 
+test("a row's menu leaves an Escape the input method processed alone and closes on a plain Escape", async () => {
+  const { screen, fireEvent } = rtl;
+  const { container } = renderPage();
+  await screen.findByText('Alice');
+  fireEvent.click(screen.getByRole('button', { name: 'Actions for Alice' }));
+  fireEvent.keyDown(document, { key: 'Escape', keyCode: 229 });
+  assert.ok(container.querySelector('.chat-row-menu-popover'), 'an Escape the input method processed closed the menu');
+  fireEvent.keyDown(document, { key: 'Escape' });
+  assert.ok(!container.querySelector('.chat-row-menu-popover'), 'Escape left the menu open');
+});
+
 test("the room's menu closes on a press outside it and on Escape, and Escape leaves the room open", async () => {
   const { screen, fireEvent, waitFor } = rtl;
   const { container } = renderPage();
@@ -3026,6 +3062,8 @@ test("the room's menu closes on a press outside it and on Escape, and Escape lea
 
   fireEvent.click(trigger);
   assert.ok(menuOpen());
+  fireEvent.keyDown(document, { key: 'Escape', keyCode: 229 });
+  assert.ok(menuOpen(), 'an Escape the input method processed closed the menu');
   fireEvent.keyDown(document, { key: 'Escape' });
   assert.ok(!menuOpen(), 'Escape left the menu open');
   assert.ok(container.querySelector('.room-header'), 'Escape closed the room along with the menu');

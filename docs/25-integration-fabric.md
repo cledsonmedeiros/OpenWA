@@ -211,7 +211,9 @@ Four tables live on the data connection, each created by a hand-authored dual-di
   should keep the default, since `body` would dedup nothing for it. The same content hash is the delivery id
   whenever no usable dedup header arrives; for an empty body it also covers the method and the query string, so
   query-borne deliveries (a GET callback, a bodiless POST) stay apart, while deliveries with neither a body nor a
-  query share one id per route and collapse within the window. Freshness is enforced whenever a route declares
+  query share one id per route and collapse within the window. On `hmac-sha256` and `standard-webhooks` such a
+  query-borne delivery reaches the handler with `verified: false`, because the signature of an empty body vouches
+  for any query sent with it. Freshness is enforced whenever a route declares
   `signature.timestampHeader`: the declared `toleranceSec` wins, and otherwise the host default
   (`INGRESS_TIMESTAMP_TOLERANCE_SEC`, default 300) applies — a declared timestamp is never accepted
   without a freshness check. Freshness alone is not replay protection, though: an **unsigned**
@@ -227,6 +229,21 @@ Four tables live on the data connection, each created by a hand-authored dual-di
   byte-identical copies within `INGRESS_DEDUP_RETENTION_DAYS` (a copy gets the route's ack and is not
   enqueued again); beyond that, handler idempotency is the only protection. The loader logs a warning
   for each such route that keeps the header-keyed default.
+  A captured signed request can also preclaim a predictable future delivery id when that header is
+  outside the signed bytes: the genuine delivery under that id is then acknowledged and suppressed
+  until the dedup marker expires. On a repeated id with different body bytes the host emits WARN
+  `ingress_dedup_body_mismatch` with `pluginId`, `instanceId` and `deliveryId`, and increments
+  `openwa_ingress_dedup_body_mismatches_total`. The default still acknowledges without dispatching:
+  providers whose retries change body bytes depend on this behavior. A historical row without a
+  payload fingerprint counts as a match.
+  A route for a provider whose retries are byte-identical may explicitly set
+  `dedupBodyMismatchAsNew: true`. A different body under an existing id then becomes a new delivery
+  with a deterministic body-specific row and queue key; its retries still collapse. The handler and
+  the `{id}` ack token retain the provider delivery id, including on queued retries, reconciliation
+  and redrive, so the handler sees the same `req.deliveryId` for both bodies; section 25.7 says how
+  such a handler keys its side effects. The flag defaults to false. Enabling it for a provider whose
+  retries change bytes can send duplicate WhatsApp messages; it does not authenticate the delivery
+  header or replace handler idempotency.
   The value of a route's declared signature header (hmac-sha256 or shared-secret) is redacted from the
   persisted and enqueued payload, like the well-known signature headers, so the plugin's handler sees
   `[redacted]` in its place.
@@ -237,7 +254,9 @@ Four tables live on the data connection, each created by a hand-authored dual-di
   instance's scope.
 - **Fail-closed by construction.** No request — including an empty-body request — is accepted by an
   authenticating scheme without the correct per-instance secret. HMAC and Standard Webhooks bind body
-  integrity; `shared-secret` authenticates only the caller header and does not bind the body.
+  integrity; `shared-secret` authenticates only the caller header and does not bind the body. No scheme
+  signs the query string or the method, so a handler must not treat either as authenticated, even when the
+  delivery arrives with `verified: true`.
   `scheme: "none"` is the only unauthenticated path, and a route declaring it **fails the whole plugin's
   load** unless the operator has explicitly opted in with `ALLOW_UNSIGNED_INGRESS=true` — manifest
   validation throws, so none of that plugin's other routes load either and its registry status is set to
@@ -268,14 +287,22 @@ dispatch when Redis is unreachable. Before Redis has ever connected, queue calls
 connects. Providers already deliver over unordered, at-least-once HTTP, so plugin handlers must be
 idempotent and treat ingress as a reconciliation trigger.
 
-A plugin's webhook handler has **5 s** (`INGRESS_DISPATCH_TIMEOUT_MS`) to finish. The host cannot cancel a
+An inline plugin webhook handler has **5 s** (`INGRESS_DISPATCH_TIMEOUT_MS`) to finish. Queued dispatch gets `SIMULATE_TYPING_MAX_MS` plus 5 s, capped at 25 s (10 s by default), below the default 30 s BullMQ lock. The host cannot cancel a
 handler that overruns it: the attempt is recorded as failed, the conversation lock is released and the
 delivery is retried (queued) or dead-lettered (inline), while the first run goes on and its work still
 lands. A handler that calls a slow upstream, or sends media, can therefore run twice for one delivery.
 Key every side effect on the delivery id (`req.deliveryId`) and hand work that can outlast the budget to
-a background task instead of awaiting it in the handler. The budget is short because a queue-disabled
-deployment answers the provider only after the inline dispatch, and providers abandon a request within a
-few seconds.
+a background task instead of awaiting it in the handler. Even a plain text send may wait up to `SIMULATE_TYPING_MAX_MS` (5 s by default) for typing simulation before contacting the engine. Do not await message sends in hooks or webhook handlers: start the promise with a `.catch` handler and return promptly. Without the queue (`QUEUE_ENABLED` unset or false)
+every dispatch keeps the 5 s inline budget. A live delivery answers the provider only after the inline dispatch,
+and providers abandon a request within a few seconds; the replays of the reconciler and of a redrive, and the
+dispatch behind a route with a response contract, wait for no provider but run under the same budget. A handler
+that awaits a typing pause longer than that needs the queue.
+
+On a route that sets `dedupBodyMismatchAsNew` (section 25.6) the handler receives the same `req.deliveryId`
+for every body the host accepts under one provider delivery id. Key its side effects on a provider event
+identity taken from the signed body, or on `req.deliveryId` together with a hash of `req.rawBody`: keyed on
+the delivery id alone, the handler would treat the second body as a repeat and drop it. A byte-identical
+retry still shares the key.
 
 A queued, retried, reconciled or redriven delivery runs with what was decided when it was accepted: the
 verification verdict (a delivery stored before the verdict was recorded reads the route as it stands) and

@@ -18,6 +18,7 @@ import {
   PollInput,
   ContactCard,
   MessageReaction,
+  MessageReceipts,
   Label,
   Channel,
   ChannelMessage,
@@ -41,6 +42,7 @@ import { createLogger } from '../../common/services/logger.service';
 import { EngineNotReadyError } from '../../common/errors/engine-not-ready.error';
 import { ChannelMediaNotSupportedError } from '../../common/errors/channel-media-not-supported.error';
 import { type ChannelMediaKind, isChannelMediaPatchApplied } from './wwebjs-channel-media-status';
+import { markNothingSent } from '../../common/errors/engine-not-sent.error';
 import { WwebjsGroups } from './wwebjs-groups';
 import { type WwebjsEngineHost } from './wwebjs-host';
 import { registerWwebjsMessageEvents } from './wwebjs-message-events';
@@ -588,6 +590,10 @@ export class WhatsAppWebJsAdapter implements IWhatsAppEngine {
     return this.contacts.resolveContactPhone(contactId);
   }
 
+  getContactLid(number: string): Promise<string | null> {
+    return this.contacts.getContactLid(number);
+  }
+
   getGroups(): Promise<Group[]> {
     return this.groups.getGroups();
   }
@@ -663,6 +669,10 @@ export class WhatsAppWebJsAdapter implements IWhatsAppEngine {
 
   getMessageReactions(chatId: string, messageId: string): Promise<MessageReaction[]> {
     return this.messaging.getMessageReactions(chatId, messageId);
+  }
+
+  getMessageReceipts(chatId: string, messageId: string): Promise<MessageReceipts> {
+    return this.messaging.getMessageReceipts(chatId, messageId);
   }
 
   // Labels (Phase 3) - WhatsApp Business only
@@ -742,7 +752,7 @@ export class WhatsAppWebJsAdapter implements IWhatsAppEngine {
     return this.messaging.unpinMessage(chatId, messageId);
   }
 
-  deleteMessage(chatId: string, messageId: string, forEveryone: boolean = true): Promise<void> {
+  deleteMessage(chatId: string, messageId: string, forEveryone: boolean = true): Promise<string | void> {
     return this.messaging.deleteMessage(chatId, messageId, forEveryone);
   }
 
@@ -978,7 +988,7 @@ export class WhatsAppWebJsAdapter implements IWhatsAppEngine {
     // routes it through WA Web's own newsletter media action, verified live for images only, so an
     // image passes when the patch is applied and every other kind keeps the typed 501 (#673).
     if (isChannelJid(chatId) && !(kind === 'image' && isChannelMediaPatchApplied())) {
-      throw new ChannelMediaNotSupportedError();
+      throw markNothingSent(new ChannelMediaNotSupportedError());
     }
   }
 }

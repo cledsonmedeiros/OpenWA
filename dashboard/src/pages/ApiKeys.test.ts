@@ -287,6 +287,23 @@ test('closing the dialog that shows a new key drops the secret, and Create opens
   assert.ok(screen.getByRole('button', { name: 'Create' }));
 });
 
+// The secret is shown only here. An Escape or a click beside the dialog closed it before it was copied, leaving an
+// active key nobody holds, so the dialog that shows it closes only on its Close button.
+test('a new key stays on screen through Escape and a click beside the dialog, until Close', async () => {
+  const { screen, fireEvent } = rtl;
+  const create = await openCreate();
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'crm-bot' } });
+  fireEvent.click(create);
+  await screen.findByText('owa_k1_new');
+
+  fireEvent.keyDown(document, { key: 'Escape' });
+  assert.equal(screen.queryByText('owa_k1_new') === null, false, 'Escape dismissed the one-time key');
+  fireEvent.mouseDown(document.querySelector('.modal-overlay') as HTMLElement);
+  assert.equal(screen.queryByText('owa_k1_new') === null, false, 'a click beside the dialog dismissed the key');
+  fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+  assert.equal(screen.queryByRole('dialog') === null, true, 'Close left the dialog open');
+});
+
 // The gateway counts an emoji, with or without its presentation selector, as one character.
 test('a name of two emoji keeps Create disabled', async () => {
   const { screen, fireEvent } = rtl;
@@ -522,6 +539,51 @@ test('editing the key the dashboard is signed in with warns before saving', asyn
   window.sessionStorage.setItem('openwa_api_key', 'owa_k1zzXXXXYYYYZZZZ');
   await openEdit(billingBot);
   assert.equal(rtl.screen.queryByText(/This dashboard is signed in with this key/) === null, true);
+});
+
+// The key seeded from API_MASTER_KEY lists a fixed marker, not its own first characters, so the row of the key the
+// dashboard signed in with is the one that no other prefix matches.
+const masterKey = {
+  ...billingBot,
+  id: 'key-master',
+  name: 'Default Admin Key',
+  keyPrefix: '(master key)',
+  role: 'admin',
+};
+
+async function openEditOf(list: Record<string, unknown>[], name: string): Promise<void> {
+  keyList = list;
+  renderApiKeys();
+  const row = (await rtl.screen.findByText(name)).closest('tr');
+  assert.ok(row, `no table row for ${name}`);
+  rtl.fireEvent.click(rtl.within(row).getByTitle('Edit access'));
+  await rtl.screen.findByRole('button', { name: 'Save' });
+}
+
+const signedInNote = () => rtl.screen.queryByText(/This dashboard is signed in with this key/);
+
+test('editing the key seeded from API_MASTER_KEY warns when the dashboard is signed in with it', async () => {
+  window.sessionStorage.setItem('openwa_api_key', 'Acme-Prod-Gateway-Master-2026-Q4!');
+  await openEditOf([masterKey, billingBot], 'Default Admin Key');
+  assert.notEqual(signedInNote(), null);
+  rtl.cleanup();
+  await openEditOf([masterKey, billingBot], 'billing-bot');
+  assert.equal(signedInNote(), null);
+});
+
+test('the warning also finds a seeded key that looks like a generated one', async () => {
+  window.sessionStorage.setItem('openwa_api_key', `owa_k1_${'ab12'.repeat(16)}`);
+  await openEditOf([masterKey, billingBot], 'Default Admin Key');
+  assert.notEqual(signedInNote(), null);
+});
+
+test('editing the key seeded from API_MASTER_KEY does not warn when the dashboard is signed in with another key', async () => {
+  window.sessionStorage.setItem('openwa_api_key', 'owa_k1abXXXXYYYYZZZZ');
+  await openEditOf([masterKey, billingBot], 'Default Admin Key');
+  assert.equal(signedInNote(), null);
+  rtl.cleanup();
+  await openEditOf([masterKey, billingBot], 'billing-bot');
+  assert.notEqual(signedInNote(), null);
 });
 
 // A datetime-local with a blank segment reports value '' (as an empty field does) and sets badInput.

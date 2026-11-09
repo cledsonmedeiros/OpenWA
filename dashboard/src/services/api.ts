@@ -359,6 +359,10 @@ export interface EngineHistoryMessage {
   kind: ChatKind;
   /** Disappearing-messages timer on the chat, in seconds. Absent when the chat has none set. */
   ephemeralDuration?: number;
+  /** True when the sender forwarded this message rather than writing it. Absent otherwise. */
+  isForwarded?: boolean;
+  /** How many times the message has been forwarded. Set with `isForwarded`. */
+  forwardingScore?: number;
   /** Sender in a group: `from` is the group JID, so this participant WID is the real poster. */
   author?: string;
   mentionedIds?: string[];
@@ -395,7 +399,6 @@ export interface EngineHistoryMessage {
     data?: string;
     omitted?: boolean;
     sizeBytes?: number;
-    archived?: boolean;
   };
   poll?: { name: string; options: string[]; allowMultipleAnswers: boolean };
   quotedMessage?: { id: string; body: string };
@@ -514,7 +517,10 @@ export interface Contact {
   id: string;
   name?: string;
   pushName?: string;
-  /** MSISDN digits without separators — always present in the response. */
+  /**
+   * MSISDN digits for a `<phone>@c.us` id. For an `<lid>@lid` id, the lid's digits on whatsapp-web.js, which are
+   * not a phone number, and on Baileys the phone's digits, or '' when the phone is unknown.
+   * Digits only, no separators — always present in the response. */
   number: string;
   isMyContact: boolean;
   isBlocked: boolean;
@@ -579,6 +585,7 @@ export interface BulkMessageItem {
     audio?: BulkMediaPayload;
     document?: BulkMediaPayload;
     caption?: string;
+    mentions?: string[];
   };
   variables?: Record<string, string>;
 }
@@ -684,8 +691,9 @@ export interface InfraStatus {
   engine: {
     type: string;
     headless: boolean;
-    // whatsapp-web.js only: the WhatsApp Web build sessions request as their pin (distinct from the
-    // library version, and not necessarily the build a page runs) and how it was chosen. (#488)
+    // whatsapp-web.js only: the WhatsApp Web build the gateway resolves for sessions to pin (distinct from the
+    // library version, and not necessarily the build a page runs: a session whose pinned page cannot be
+    // downloaded or written starts unpinned) and how it was chosen. (#488)
     webVersion?: string | null;
     webVersionSource?: 'pinned' | 'auto' | 'native';
   };

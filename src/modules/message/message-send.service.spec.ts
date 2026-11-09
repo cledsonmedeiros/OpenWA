@@ -780,6 +780,32 @@ describe('MessageSendService', () => {
       expect(mockEngine.sendTextMessage).not.toHaveBeenCalled();
     });
 
+    it('answers a 400 and stores nothing for a template that renders to no text, as send-text does', async () => {
+      (templateService.resolve as jest.Mock).mockResolvedValue(mockTemplate({ body: '{{customer}}' }));
+
+      await expect(
+        service.sendTemplate('sess-1', { chatId: 'test@c.us', templateId: 'tpl-1', vars: { customer: '' } }),
+      ).rejects.toThrow(new BadRequestException('Rendered template is empty'));
+      expect(repository.save).not.toHaveBeenCalled();
+      expect(mockEngine.sendTextMessage).not.toHaveBeenCalled();
+    });
+
+    it('answers a 400 for a template whose header, body and footer all render empty', async () => {
+      (templateService.resolve as jest.Mock).mockResolvedValue(
+        mockTemplate({ header: '{{a}}', body: '{{b}}', footer: '{{c}}' }),
+      );
+
+      await expect(
+        service.sendTemplate('sess-1', {
+          chatId: 'test@c.us',
+          templateId: 'tpl-1',
+          vars: { a: '', b: '', c: '' },
+        }),
+      ).rejects.toThrow(new BadRequestException('Rendered template is empty'));
+      expect(repository.save).not.toHaveBeenCalled();
+      expect(mockEngine.sendTextMessage).not.toHaveBeenCalled();
+    });
+
     it('still renders a number sent for a variable', async () => {
       (templateService.resolve as jest.Mock).mockResolvedValue(mockTemplate({ body: 'Order {{orderId}}' }));
 
@@ -1679,6 +1705,70 @@ describe('MessageSendService', () => {
 
       expect(assertSendAllowed).toHaveBeenCalledWith('sess-1', 'to@c.us', { whilePreparing: true });
     });
+
+    const pendingRow = (): unknown => ((repository.create as jest.Mock).mock.calls as unknown[][])[0][0];
+    const forwardIt = (svc: MessageSendService = service) =>
+      svc.forward('sess-1', { fromChatId: '628111@c.us', toChatId: 'to@c.us', messageId: 'wa-src' });
+
+    it('stores a poll it finds under the lid form of the source chat, with its options', async () => {
+      const poll = { name: 'Lunch?', options: ['yes', 'no'], allowMultipleAnswers: false };
+      (repository.findOne as jest.Mock).mockImplementation(({ where }: { where: { chatId: FindOperator<string> } }) =>
+        Promise.resolve(
+          (where.chatId.value as unknown as string[]).includes('999@lid')
+            ? { type: 'poll', body: 'Lunch?', metadata: { poll, quotedMessage: { id: 'q', body: 'x' } } }
+            : null,
+        ),
+      );
+      const store = {
+        findPhoneForLid: jest.fn().mockResolvedValue(null),
+        findLidsForPhone: jest.fn((phone: string) => Promise.resolve(phone === '628111' ? ['999'] : [])),
+      } as unknown as LidMappingStoreService;
+      const withStore = new MessageSendService(
+        repository as Repository<Message>,
+        sessionService as unknown as SessionService,
+        engines,
+        hookManager as HookManager,
+        templateService as unknown as TemplateService,
+        inertPacing(),
+        undefined,
+        undefined,
+        store,
+      );
+
+      await forwardIt(withStore);
+
+      expect(pendingRow()).toMatchObject({ chatId: 'to@c.us', type: 'poll', body: 'Lunch?', metadata: { poll } });
+      expect(pendingRow()).not.toHaveProperty('metadata.quotedMessage');
+    });
+
+    // A media row always carries a media field (an empty bubble otherwise), and an archive pointer names the source
+    // row's file, which this row does not have.
+    it.each([
+      [
+        'archived',
+        { media: { mimetype: 'image/jpeg', omitted: true, archived: true, sizeBytes: 10 } },
+        { mimetype: 'image/jpeg', omitted: true, sizeBytes: 10 },
+      ],
+      ['missing', null, { mimetype: '', omitted: true }],
+    ])('stores media the source row holds no bytes for (%s) as the omitted marker', async (_how, metadata, media) => {
+      (repository.findOne as jest.Mock).mockResolvedValue({ type: 'image', body: 'the caption', metadata });
+
+      await forwardIt();
+
+      expect((pendingRow() as { metadata: unknown }).metadata).toEqual({ media });
+    });
+
+    it.each([
+      ['was deleted', () => (repository.findOne as jest.Mock).mockResolvedValue({ type: 'revoked', body: '' })],
+      ['cannot be read', () => (repository.findOne as jest.Mock).mockRejectedValue(new Error('db down'))],
+    ])('stores the placeholder and still forwards when the stored message %s', async (_why, arrange) => {
+      arrange();
+
+      await forwardIt();
+
+      expect(pendingRow()).toMatchObject({ type: 'forward', body: '[Forwarded]' });
+      expect(mockEngine.forwardMessage).toHaveBeenCalledWith('628111@c.us', 'to@c.us', 'wa-src');
+    });
   });
 
   // ── pacing admission release ──────────────────────────────────────
@@ -1972,6 +2062,53 @@ describe('MessageSendService', () => {
         { status: MessageStatus.SENT, timestamp: 1706868000 },
       );
     });
+
+    // The pending reaper failed the row while the upload ran, which dropped its payload: the retained row is the one
+    // that is FAILED, and it has to get the payload back from the copy this send still holds.
+    it('retains a row the pending reaper failed first, payload included, when merging onto the echo fails', async () => {
+      (repository.update as jest.Mock)
+        .mockResolvedValueOnce({ affected: 0 }) // the SENT write guarded on PENDING: the row is FAILED now
+        .mockRejectedValueOnce(new Error('UNIQUE constraint failed: messages.sessionId, messages.waMessageId')) // the rewrite meets the echo's id
+        .mockRejectedValueOnce(new Error('SQLITE_BUSY')); // the metadata merge onto the echo row
+      (repository.findOne as jest.Mock).mockResolvedValue({ id: 'echo-row', metadata: {} });
+
+      const result = await service.sendImage('sess-1', { chatId: '621@c.us', base64: 'QUJD', mimetype: 'image/png' });
+
+      expect(result.messageId).toBe('wa-msg-1');
+      expect(repository.delete).not.toHaveBeenCalled();
+      const update = repository.update as jest.Mock<unknown, [unknown, Record<string, unknown>]>;
+      const [where, patch] = update.mock.calls.at(-1) ?? [];
+      expect(where).toEqual({ id: 'msg-uuid-1', status: MessageStatus.FAILED });
+      expect(patch).toMatchObject({ status: MessageStatus.SENT, timestamp: 1706868000 });
+      expect(patch).toMatchObject({ metadata: { media: { data: 'QUJD' } } });
+      expect(patch).not.toHaveProperty('waMessageId');
+    });
+
+    // The reaper can also fail the row after this send's first write found it PENDING and met the echo's id, while the
+    // merge onto the echo row is being tried. The write guarded on PENDING then matches nothing and the row is recovered
+    // the same way.
+    it('retains a row the pending reaper failed while the merge onto the echo was tried, payload included', async () => {
+      (repository.update as jest.Mock)
+        .mockRejectedValueOnce(new Error('UNIQUE constraint failed: messages.sessionId, messages.waMessageId'))
+        .mockRejectedValueOnce(new Error('SQLITE_BUSY')) // the metadata merge onto the echo row
+        .mockResolvedValueOnce({ affected: 0 }); // the write guarded on PENDING: the row is FAILED by now
+      (repository.findOne as jest.Mock).mockResolvedValue({ id: 'echo-row', metadata: {} });
+
+      const result = await service.sendImage('sess-1', { chatId: '621@c.us', base64: 'QUJD', mimetype: 'image/png' });
+
+      expect(result.messageId).toBe('wa-msg-1');
+      expect(repository.delete).not.toHaveBeenCalled();
+      const update = repository.update as jest.Mock<unknown, [unknown, Record<string, unknown>]>;
+      const [pendingWhere, pendingPatch] = update.mock.calls.at(-2) ?? [];
+      expect(pendingWhere).toEqual({ id: 'msg-uuid-1', status: MessageStatus.PENDING });
+      expect(pendingPatch).toEqual({ status: MessageStatus.SENT, timestamp: 1706868000 });
+      const [where, patch] = update.mock.calls.at(-1) ?? [];
+      expect(where).toEqual({ id: 'msg-uuid-1', status: MessageStatus.FAILED });
+      expect(patch).toMatchObject({ status: MessageStatus.SENT, timestamp: 1706868000 });
+      expect(patch).toMatchObject({ metadata: { media: { data: 'QUJD' } } });
+      expect(patch).not.toHaveProperty('waMessageId');
+    });
+
     it('merges state onto the echo row, then drops the redundant PENDING row', async () => {
       // The engine's message_create echo won the insert race, so the SENT-state update
       // collides on UNIQUE(sessionId, waMessageId). The echo row carries only what the engine reported

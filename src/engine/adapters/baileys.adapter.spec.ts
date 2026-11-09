@@ -24,6 +24,7 @@ jest.mock('../../common/media/load-remote-media', () => ({
 // The probe runs a child process; its own spec drives the real one.
 jest.mock('./baileys-audio-probe', () => ({
   describeAudio: jest.fn(() => Promise.resolve({ seconds: 0 })),
+  describeVideo: jest.fn(() => Promise.resolve({ jpegThumbnail: null })),
 }));
 
 // A fake Baileys socket: an event emitter wearing the methods the adapter calls.
@@ -243,7 +244,7 @@ import { EngineThrottledError } from '../../common/errors/engine-throttled.error
 import { LidNotMappedError } from '../../common/errors/lid-not-mapped.error';
 import { countsTowardSendBreaker, sentNothing } from '../../modules/message/send-pacing.service';
 import { loadRemoteMediaBuffer } from '../../common/media/load-remote-media';
-import { describeAudio } from './baileys-audio-probe';
+import { describeAudio, describeVideo } from './baileys-audio-probe';
 import * as safeLinkPreview from './safe-link-preview';
 import sharp from 'sharp';
 
@@ -453,6 +454,40 @@ describe('BaileysAdapter lifecycle & status', () => {
     } finally {
       fakeSock.signalRepository = undefined;
     }
+  });
+
+  it('refuses a retry from another phone number chat for a message received under a lid with its sender phone', async () => {
+    await newAdapter().initialize(noopCallbacks({}));
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    const makeWASocket = jest.requireMock('@whiskeysockets/baileys').default as jest.Mock;
+    const [[{ getMessage }]] = makeWASocket.mock.calls as Array<
+      [{ getMessage: (key: { remoteJid?: string; id?: string }) => Promise<unknown> }]
+    >;
+    const content = { conversation: 'private' };
+    fakeStore.getMessage.mockResolvedValue({
+      key: { remoteJid: '44556677@lid', remoteJidAlt: '628444@s.whatsapp.net', fromMe: false, id: 'M2' },
+      message: content,
+    });
+
+    await expect(getMessage({ remoteJid: '628555@s.whatsapp.net', id: 'M2' })).resolves.toBeUndefined();
+    await expect(getMessage({ remoteJid: '628444@s.whatsapp.net', id: 'M2' })).resolves.toBe(content);
+  });
+
+  it("answers a retry by phone number for a phone-typed own message stored with the account's number beside the lid", async () => {
+    await newAdapter().initialize(noopCallbacks({}));
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    const makeWASocket = jest.requireMock('@whiskeysockets/baileys').default as jest.Mock;
+    const [[{ getMessage }]] = makeWASocket.mock.calls as Array<
+      [{ getMessage: (key: { remoteJid?: string; id?: string }) => Promise<unknown> }]
+    >;
+    const content = { conversation: 'hi' };
+    // On the account's own key Baileys files the sender's other id, the account's own number, as remoteJidAlt.
+    fakeStore.getMessage.mockResolvedValue({
+      key: { remoteJid: '44556677@lid', remoteJidAlt: '628999@s.whatsapp.net', fromMe: true, id: 'M1' },
+      message: content,
+    });
+
+    await expect(getMessage({ remoteJid: '628444@s.whatsapp.net', id: 'M1' })).resolves.toBe(content);
   });
 
   it("answers an RSVP's lookup of the account's own 1:1 event under the account's own jid", async () => {
@@ -1897,9 +1932,11 @@ describe('BaileysAdapter location + contact + poll sends', () => {
     await adapter.sendContactMessage('628111@s.whatsapp.net', { name: 'John Doe', number: '+1 234-567' });
     const [, call] = fakeSock.sendMessage.mock.calls[0] as [
       string,
-      { contacts: { displayName: string; contacts: { vcard: string }[] } },
+      { contacts: { displayName: string; contacts: { displayName?: string; vcard: string }[] } },
     ];
     expect(call.contacts.displayName).toBe('John Doe');
+    // Baileys builds a single card from the entry alone (Utils/messages.js), dropping the outer name.
+    expect(call.contacts.contacts[0].displayName).toBe('John Doe');
     const vcard = call.contacts.contacts[0].vcard;
     expect(vcard).toContain('FN:John Doe');
     expect(vcard).toContain('waid=1234567:+1 234-567');
@@ -1909,10 +1946,15 @@ describe('BaileysAdapter location + contact + poll sends', () => {
   it('sanitizes CRLF in a contact name to prevent vCard line-injection', async () => {
     const adapter = await ready();
     await adapter.sendContactMessage('628111@s.whatsapp.net', { name: 'Eve\nEMAIL:evil@x.com', number: '123' });
-    const [, call] = fakeSock.sendMessage.mock.calls[0] as [string, { contacts: { contacts: { vcard: string }[] } }];
+    const [, call] = fakeSock.sendMessage.mock.calls[0] as [
+      string,
+      { contacts: { contacts: { displayName?: string; vcard: string }[] } },
+    ];
     const vcard = call.contacts.contacts[0].vcard;
     expect(vcard).not.toMatch(/\nEMAIL:evil@x\.com/);
     expect(vcard).toContain('FN:Eve EMAIL:evil@x.com');
+    // The name the bubble shows reads as the vCard's FN does on whatsapp-web.js, line break read as a space.
+    expect(call.contacts.contacts[0].displayName).toBe('Eve EMAIL:evil@x.com');
   });
 
   it('sendPollMessage maps name/values and defaults to single choice (selectableCount 1)', async () => {
@@ -2230,6 +2272,20 @@ describe('BaileysAdapter messaging', () => {
   it('getNumberId reports an unanswered lookup instead of claiming the number is not on WhatsApp', async () => {
     fakeSock.onWhatsApp.mockResolvedValue(undefined);
     const adapter = await readyAdapter();
+    await expect(adapter.getNumberId('628111')).rejects.toBeInstanceOf(EngineTransportError);
+    await expect(adapter.checkNumberExists('628111')).rejects.toBeInstanceOf(EngineTransportError);
+  });
+
+  // A server error node and a connection that closes mid-query reject onWhatsApp with a raw Boom. Both are a
+  // failure to ask, so the route answers its documented 503, never a 500 and never a verdict on the number.
+  it('getNumberId reports a rate-limited lookup as throttled and any other rejection as a transport failure', async () => {
+    const adapter = await readyAdapter();
+    fakeSock.onWhatsApp.mockRejectedValue(Object.assign(new Error('rate-overlimit'), { data: 429 }));
+    await expect(adapter.getNumberId('628111')).rejects.toBeInstanceOf(EngineThrottledError);
+
+    fakeSock.onWhatsApp.mockRejectedValue(
+      Object.assign(new Error('Connection Closed'), { output: { statusCode: 428 } }),
+    );
     await expect(adapter.getNumberId('628111')).rejects.toBeInstanceOf(EngineTransportError);
     await expect(adapter.checkNumberExists('628111')).rejects.toBeInstanceOf(EngineTransportError);
   });
@@ -3121,6 +3177,39 @@ describe('BaileysAdapter inbound fan-out', () => {
       status: 'read',
       timestamp: 1700000000,
     });
+  });
+
+  it('reports a group message as delivered through onMessageAck once every member has received it', async () => {
+    const group = '120363000000000001@g.us';
+    const onMessageAck = jest.fn();
+    const adapter = newAdapter();
+    await adapter.initialize({ onMessageAck });
+    // A lid-addressed group: the roster lists each member's lid with the phone number beside it. Once, so the
+    // answer does not outlive this test: the roster is read a single time and then cached.
+    fakeSock.groupMetadata.mockResolvedValueOnce({
+      id: group,
+      subject: 'Team',
+      participants: [
+        { id: '111111111111111@lid', phoneNumber: '628222@s.whatsapp.net' },
+        { id: '222222222222222@lid', phoneNumber: '628333@s.whatsapp.net' },
+      ],
+    });
+    const delivered = (userJid: string) => ({
+      key: { id: 'OUT1', remoteJid: group, fromMe: true },
+      receipt: { userJid, receiptTimestamp: 1700000000 },
+    });
+    const settle = async (): Promise<void> => {
+      for (let hop = 0; hop < 3; hop++) await new Promise(resolve => setImmediate(resolve));
+    };
+
+    fakeSock.fire('message-receipt.update', [delivered('111111111111111@lid')]);
+    await settle();
+    expect(onMessageAck).not.toHaveBeenCalled();
+
+    fakeSock.fire('message-receipt.update', [delivered('222222222222222@lid'), delivered('222222222222222@lid')]);
+    await settle();
+    expect(onMessageAck.mock.calls).toEqual([['OUT1', 'delivered', group]]);
+    expect(fakeSock.groupMetadata).toHaveBeenCalledTimes(1);
   });
 
   it('inbound image: downloads media and exposes base64 + caption as body', async () => {
@@ -4020,11 +4109,33 @@ describe('BaileysAdapter inbound fan-out', () => {
       expect(await deliver({ remoteJid: bob, fromMe: false }, { remoteJid: alice, fromMe: false }, message)).toBe(0);
     });
 
-    it('drops a group edit of a message another member sent but keeps a group revoke of it (an admin may revoke)', async () => {
+    it('drops a group edit of another member message but keeps a revoke of it when the roster cannot be read', async () => {
       const original = { remoteJid: group, fromMe: false, participant: bob };
       const key = { remoteJid: group, fromMe: false, participant: alice };
       expect(await deliver(original, key, edit)).toBe(0);
+      fakeSock.groupMetadata.mockRejectedValueOnce(new Error('item-not-found'));
       expect(await deliver(original, key, revoke)).toBe(1);
+    });
+
+    it('keeps a group revoke of another member message only from an admin the group roster shows', async () => {
+      const original = { remoteJid: group, fromMe: false, participant: bob };
+      const key = { remoteJid: group, fromMe: false, participant: alice };
+      const roster = (admin: 'admin' | null) =>
+        fakeSock.groupMetadata.mockResolvedValue({
+          id: group,
+          participants: [
+            { id: alice, admin },
+            { id: bob, admin: null },
+          ],
+        });
+      try {
+        roster(null);
+        expect(await deliver(original, key, revoke)).toBe(0);
+        roster('admin');
+        expect(await deliver(original, key, revoke)).toBe(1);
+      } finally {
+        fakeSock.groupMetadata.mockReset();
+      }
     });
 
     it.each([
@@ -4375,7 +4486,29 @@ describe('BaileysAdapter media sends', () => {
       video: Buffer.from([9]),
       caption: undefined,
       mimetype: 'video/mp4',
+      jpegThumbnail: null,
     });
+  });
+
+  // Baileys runs ffmpeg through a shell on the file itself whenever the content has no thumbnail.
+  it('sendVideoMessage hands Baileys the thumbnail made outside it, so it runs no ffmpeg of its own', async () => {
+    (describeVideo as jest.Mock).mockResolvedValueOnce({ jpegThumbnail: '/9j/2Q==' });
+    const adapter = await ready();
+
+    await adapter.sendVideoMessage('628111@s.whatsapp.net', { mimetype: 'video/mp4', data: Buffer.from([7]) });
+
+    expect(describeVideo).toHaveBeenLastCalledWith(Buffer.from([7]));
+    const [, content] = fakeSock.sendMessage.mock.calls[0] as [string, Record<string, unknown>];
+    expect(content).toHaveProperty('jpegThumbnail', '/9j/2Q==');
+  });
+
+  it('sendVideoMessage keeps a null thumbnail null rather than leaving the key for Baileys to fill', async () => {
+    const adapter = await ready();
+
+    await adapter.sendVideoMessage('628111@s.whatsapp.net', { mimetype: 'video/mp4', data: Buffer.from([7]) });
+
+    const [, content] = fakeSock.sendMessage.mock.calls[0] as [string, Record<string, unknown>];
+    expect(content).toHaveProperty('jpegThumbnail', null);
   });
 
   it('sendAudioMessage sets ptt:false', async () => {
@@ -5119,6 +5252,48 @@ describe('BaileysAdapter store-backed ops', () => {
     expect(fakeSock.sendMessage).not.toHaveBeenCalled();
   });
 
+  // WhatsApp edits a text or the caption of a photo, video or document, and whatsapp-web.js refuses the rest.
+  it.each([
+    ['location', { locationMessage: { degreesLatitude: 1, degreesLongitude: 2 } }],
+    ['sticker', { stickerMessage: { mimetype: 'image/webp' } }],
+    ['poll', { pollCreationMessage: { name: 'Lunch?', options: [{ optionName: 'Yes' }] } }],
+    ['contact card', { contactMessage: { displayName: 'Ann', vcard: 'BEGIN:VCARD' } }],
+    ['voice note', { audioMessage: { mimetype: 'audio/ogg; codecs=opus', ptt: true } }],
+  ])(
+    'editMessage refuses an own %s, which has no text to edit, with a 403 and sends nothing',
+    async (_kind, message) => {
+      fakeStore.getMessage.mockResolvedValue({ ...ownStored, message });
+      const adapter = await ready();
+      await expect(adapter.editMessage('628111@s.whatsapp.net', 'TARGET', 'x')).rejects.toBeInstanceOf(
+        EngineRefusedError,
+      );
+      expect(fakeSock.sendMessage).not.toHaveBeenCalled();
+      expect(fakeStore.update).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ['a text with a link preview', { extendedTextMessage: { text: 'hi' } }],
+    ['a photo caption', { imageMessage: { caption: 'old' } }],
+    ['a video caption', { videoMessage: { caption: 'old' } }],
+    ['a document caption', { documentMessage: { caption: 'old', fileName: 'a.pdf' } }],
+    ['a text in a disappearing chat', { ephemeralMessage: { message: { conversation: 'hi' } } }],
+  ])('editMessage still edits %s', async (_kind, message) => {
+    jest
+      .requireMock<Record<string, jest.Mock>>('@whiskeysockets/baileys')
+      .normalizeMessageContent.mockImplementation((c: { ephemeralMessage?: { message: unknown } } | undefined) =>
+        c?.ephemeralMessage ? c.ephemeralMessage.message : c,
+      );
+    fakeStore.getMessage.mockResolvedValue({ ...ownStored, message });
+    fakeSock.sendMessage.mockResolvedValue(undefined);
+    const adapter = await ready();
+    await expect(adapter.editMessage('628111@s.whatsapp.net', 'TARGET', 'new')).resolves.toEqual({
+      id: 'TARGET',
+      timestamp: 1700000000,
+    });
+    expect(fakeSock.sendMessage).toHaveBeenCalledTimes(1);
+  });
+
   it('editMessage throws MessageNotFoundError when the stored key belongs to another chat', async () => {
     fakeStore.getMessage.mockResolvedValue({
       ...ownStored,
@@ -5644,7 +5819,7 @@ describe('BaileysAdapter group management', () => {
     expect(info).toMatchObject({ isAnnounce: true, isReadOnly: false });
   });
 
-  it('getGroupInfo maps groupMetadata, and returns null only for a server refusal (401/403/404)', async () => {
+  it('getGroupInfo maps groupMetadata, and returns null only for a server refusal (a 4xx answer)', async () => {
     fakeSock.groupMetadata.mockResolvedValueOnce(META);
     const adapter = await ready();
     expect((await adapter.getGroupInfo('123-456@g.us'))?.id).toBe('123-456@g.us');
@@ -5658,11 +5833,11 @@ describe('BaileysAdapter group management', () => {
 
   it('getGroupInfo does NOT fold a transport death into null — a dead socket is not "group not found"', async () => {
     const adapter = await ready();
-    // Local Boom, no server error node: DisconnectReason-shaped 428 Connection Closed.
+    // Local Boom, no server error node: DisconnectReason-shaped 428 Connection Closed. A retryable 503.
     const connectionClosed = new Boom('Connection Closed', { statusCode: 428 });
     fakeSock.groupMetadata.mockRejectedValueOnce(connectionClosed);
-    await expect(adapter.getGroupInfo('123-456@g.us')).rejects.toBe(connectionClosed);
-    // A non-boom failure (programming/protocol error) propagates too.
+    await expect(adapter.getGroupInfo('123-456@g.us')).rejects.toBeInstanceOf(EngineTransportError);
+    // A non-boom failure (programming/protocol error) propagates as it came.
     fakeSock.groupMetadata.mockRejectedValueOnce(new Error('unexpected'));
     await expect(adapter.getGroupInfo('123-456@g.us')).rejects.toThrow('unexpected');
   });
@@ -5815,11 +5990,11 @@ describe('BaileysAdapter group management', () => {
   });
 
   it('joinGroupViaInviteCode does NOT fold a transport death into a 400 — a dead socket is not a bad invite', async () => {
-    // Local Boom, no server error node: DisconnectReason-shaped 428 Connection Closed.
+    // Local Boom, no server error node: DisconnectReason-shaped 428 Connection Closed. A retryable 503.
     const connectionClosed = new Boom('Connection Closed', { statusCode: 428 });
     fakeSock.groupAcceptInvite.mockRejectedValue(connectionClosed);
     const adapter = await ready();
-    await expect(adapter.joinGroupViaInviteCode('CODE123')).rejects.toBe(connectionClosed);
+    await expect(adapter.joinGroupViaInviteCode('CODE123')).rejects.toBeInstanceOf(EngineTransportError);
   });
 
   it('getGroupJoinInfo maps the preview fields, neutralizing ids', async () => {
@@ -5850,11 +6025,11 @@ describe('BaileysAdapter group management', () => {
     await expect(adapter.getGroupJoinInfo('BAD')).rejects.toBeInstanceOf(GroupNotFoundError);
   });
 
-  it('getGroupJoinInfo lets a transport death propagate — a dead socket is not a bad invite', async () => {
+  it('getGroupJoinInfo answers a transport death with a 503: a dead socket is not a bad invite', async () => {
     const connectionClosed = new Boom('Connection Closed', { statusCode: 428 });
     fakeSock.groupGetInviteInfo.mockRejectedValue(connectionClosed);
     const adapter = await ready();
-    await expect(adapter.getGroupJoinInfo('CODE123')).rejects.toBe(connectionClosed);
+    await expect(adapter.getGroupJoinInfo('CODE123')).rejects.toBeInstanceOf(EngineTransportError);
   });
 
   // The raw Boom used to escape as a 500 on every admin-refused group write, while the controller
@@ -6016,11 +6191,11 @@ describe('BaileysAdapter group management', () => {
     expect(fakeSock.removeChatLabel).not.toHaveBeenCalled();
   });
 
-  it('a transport death on a group write propagates untouched — not folded into a 403', async () => {
+  it('a transport death on a group write answers a 503, not a 403', async () => {
     const connectionClosed = new Boom('Connection Closed', { statusCode: 428 });
     fakeSock.groupUpdateSubject.mockRejectedValueOnce(connectionClosed);
     const adapter = await ready();
-    await expect(adapter.setGroupSubject('123-456@g.us', 'X')).rejects.toBe(connectionClosed);
+    await expect(adapter.setGroupSubject('123-456@g.us', 'X')).rejects.toBeInstanceOf(EngineTransportError);
   });
 
   it('addParticipants maps the per-participant [{status, jid}] array — a partial refusal does not throw', async () => {
@@ -6088,7 +6263,7 @@ describe('BaileysAdapter group management', () => {
     fakeSock.groupParticipantsUpdate.mockRejectedValueOnce(connectionClosed);
     const adapter = await ready();
     const err = await adapter.removeParticipants('123-456@g.us', ['628111@c.us']).catch((e: unknown) => e);
-    expect(err).toBe(connectionClosed);
+    expect(err).toBeInstanceOf(EngineTransportError);
   });
 
   it('keeps an unanswered participant update a 503, not a 403', async () => {
@@ -6142,11 +6317,11 @@ describe('BaileysAdapter group management', () => {
     await expect(adapter.setGroupMemberLabel('123-456@g.us', 'Site A')).rejects.toBeInstanceOf(errorClass);
   });
 
-  it('setGroupMemberLabel lets a dead socket propagate rather than report a refusal', async () => {
+  it('setGroupMemberLabel answers a dead socket with a retryable 503 rather than a refusal', async () => {
     const connectionClosed = new Boom('Connection Closed', { statusCode: 428 });
     fakeSock.updateMemberLabel.mockRejectedValueOnce(connectionClosed);
     const adapter = await ready();
-    await expect(adapter.setGroupMemberLabel('123-456@g.us', 'Site A')).rejects.toBe(connectionClosed);
+    await expect(adapter.setGroupMemberLabel('123-456@g.us', 'Site A')).rejects.toBeInstanceOf(EngineTransportError);
   });
 
   it('getGroupInfo populates announce/locked/ephemeralSeconds from the metadata', async () => {
@@ -6515,11 +6690,11 @@ describe('BaileysAdapter group events (group-participants.update / groups.update
   });
 
   it('retains a lid actor when the credentials cannot identify it as this account', async () => {
-    // Without `user.lid` every lid comparison answered false, so the group this session had just
-    // created was reported as a join of itself. The store's own lid mapping settles it instead.
+    // Identity is not derived from the session's lid mapping: without `user.lid` no lid is recognised as
+    // this account, so the group it created, named by lid alone, is reported as a join.
     fakeSock.user = { id: '628999:1@s.whatsapp.net', name: 'Me' }; // no lid on the creds
     const { onGroupEvent } = await readyWithGroupEvents();
-    // The session learns its own lid from ordinary traffic, the same way every other mapping arrives.
+    // Even once the session has learned its own lid from ordinary traffic.
     fakeSock.fire('lid-mapping.update', { lid: '999000@lid', pn: '628999@s.whatsapp.net' });
 
     fakeSock.fire('groups.upsert', [createdGroup({ author: '999000@lid', owner: '999000@lid', authorPn: undefined })]);
@@ -8811,9 +8986,21 @@ describe('BaileysAdapter status posting', () => {
     await adapter.postVideoStatus({ mimetype: 'video/mp4', data: 'AAAA' }, { recipients: ['628111@c.us'] });
     expect(fakeSock.sendMessage).toHaveBeenCalledWith(
       'status@broadcast',
-      { video: Buffer.from('AAAA', 'base64'), caption: undefined, mimetype: 'video/mp4' },
+      { video: Buffer.from('AAAA', 'base64'), caption: undefined, mimetype: 'video/mp4', jpegThumbnail: null },
       { statusJidList: ['628111@s.whatsapp.net'], backgroundColor: undefined, font: undefined },
     );
+  });
+
+  it('postVideoStatus hands Baileys the thumbnail made outside it, as a chat video does', async () => {
+    (describeVideo as jest.Mock).mockResolvedValueOnce({ jpegThumbnail: '/9j/2Q==' });
+    fakeSock.sendMessage.mockResolvedValue({ key: { id: 'VID2' }, messageTimestamp: 1719600000 });
+    const adapter = await ready();
+
+    await adapter.postVideoStatus({ mimetype: 'video/mp4', data: 'AAAA' }, { recipients: ['628111@c.us'] });
+
+    expect(describeVideo).toHaveBeenLastCalledWith(Buffer.from('AAAA', 'base64'));
+    const [, content] = fakeSock.sendMessage.mock.calls[0] as [string, Record<string, unknown>];
+    expect(content).toHaveProperty('jpegThumbnail', '/9j/2Q==');
   });
 
   // A URL posted without a declared type carries the octet-stream placeholder, so the fetched
@@ -10592,6 +10779,69 @@ describe('BaileysAdapter keeps the message store in step with edits and deletes'
     expect(fakeStore.put).toHaveBeenCalledTimes(2);
   });
 
+  it('still takes a repeat delivery of an own message still downloading under the other id of its chat', async () => {
+    let release!: () => void;
+    baileys.downloadMediaMessage
+      .mockReturnValueOnce(
+        new Promise(resolve => {
+          release = () => resolve(streamOf(Buffer.from('JPEG')));
+        }),
+      )
+      .mockReturnValueOnce(Promise.resolve(streamOf(Buffer.from('JPEG'))));
+    const warn = jest.spyOn(loggerOf(await started()), 'warn').mockImplementation(() => undefined);
+    const delivery = (key: Record<string, unknown>) => ({
+      key: { fromMe: true, id: 'OWN_TWICE', ...key },
+      message: { imageMessage: { mimetype: 'image/jpeg', caption: 'typed on the phone' } },
+      messageTimestamp: 1700000099,
+    });
+    // Typed on the phone in a chat addressed by lid there: Baileys files the account's own number beside it.
+    fakeSock.fire('messages.upsert', {
+      type: 'notify',
+      messages: [delivery({ remoteJid: '44556677@lid', remoteJidAlt: '628999@s.whatsapp.net' })],
+    });
+    fakeSock.fire('messages.upsert', { type: 'notify', messages: [delivery({ remoteJid: PEER })] });
+    for (let i = 0; i < 5; i++) await settle();
+    release();
+    for (let i = 0; i < 5; i++) await settle();
+
+    expect(warn).not.toHaveBeenCalledWith(
+      'Dropping a message that reuses the id of one still being processed',
+      expect.anything(),
+    );
+    expect(fakeStore.put).toHaveBeenCalledTimes(2);
+  });
+
+  it('still takes a repeat delivery of an own message under the lid of its chat after the one under its number', async () => {
+    let release!: () => void;
+    baileys.downloadMediaMessage
+      .mockReturnValueOnce(
+        new Promise(resolve => {
+          release = () => resolve(streamOf(Buffer.from('JPEG')));
+        }),
+      )
+      .mockReturnValueOnce(Promise.resolve(streamOf(Buffer.from('JPEG'))));
+    const warn = jest.spyOn(loggerOf(await started()), 'warn').mockImplementation(() => undefined);
+    const delivery = (key: Record<string, unknown>) => ({
+      key: { fromMe: true, id: 'OWN_TWICE_REVERSED', ...key },
+      message: { imageMessage: { mimetype: 'image/jpeg', caption: 'typed on the phone' } },
+      messageTimestamp: 1700000099,
+    });
+    fakeSock.fire('messages.upsert', { type: 'notify', messages: [delivery({ remoteJid: PEER })] });
+    fakeSock.fire('messages.upsert', {
+      type: 'notify',
+      messages: [delivery({ remoteJid: '44556677@lid', remoteJidAlt: '628999@s.whatsapp.net' })],
+    });
+    for (let i = 0; i < 5; i++) await settle();
+    release();
+    for (let i = 0; i < 5; i++) await settle();
+
+    expect(warn).not.toHaveBeenCalledWith(
+      'Dropping a message that reuses the id of one still being processed',
+      expect.anything(),
+    );
+    expect(fakeStore.put).toHaveBeenCalledTimes(2);
+  });
+
   const ownStored = {
     key: { id: 'TARGET', remoteJid: PEER, fromMe: true },
     message: { conversation: 'as sent' },
@@ -12229,5 +12479,205 @@ describe('BaileysAdapter group metadata cache', () => {
     await cachedGroupMetadata(GROUP);
 
     expect(fakeSock.groupMetadata).toHaveBeenCalledTimes(2);
+  });
+
+  describe('as the roster behind the acks of a group message', () => {
+    const delivered = (id: string) => ({
+      key: { id, remoteJid: GROUP, fromMe: true },
+      receipt: { userJid: '111@lid', receiptTimestamp: 1700000000 },
+    });
+    const settle = async (): Promise<void> => {
+      for (let hop = 0; hop < 3; hop++) await new Promise(resolve => setImmediate(resolve));
+    };
+    const roster = () =>
+      fakeSock.groupMetadata.mockReset().mockResolvedValue({
+        id: GROUP,
+        subject: 'G',
+        participants: [{ id: '111@lid', phoneNumber: '628111@s.whatsapp.net' }],
+      });
+    const readyWithAcks = async (): Promise<jest.Mock> => {
+      const onMessageAck = jest.fn();
+      const adapter = newAdapter();
+      await adapter.initialize({ onMessageAck });
+      fakeSock.fire('connection.update', { connection: 'open' });
+      return onMessageAck;
+    };
+
+    it('is read once for the first receipts of several messages of a group, from the cache the sends use', async () => {
+      roster();
+      const onMessageAck = await readyWithAcks();
+      fakeSock.fire('message-receipt.update', [delivered('OUT1'), delivered('OUT2')]);
+      await settle();
+
+      expect(onMessageAck.mock.calls).toEqual([
+        ['OUT1', 'delivered', GROUP],
+        ['OUT2', 'delivered', GROUP],
+      ]);
+      expect(fakeSock.groupMetadata).toHaveBeenCalledTimes(1);
+    });
+
+    it('is queried for every message when the cache is off', async () => {
+      process.env[TTL_ENV] = '0';
+      roster();
+      const onMessageAck = await readyWithAcks();
+      fakeSock.fire('message-receipt.update', [delivered('OUT1')]);
+      await settle();
+      fakeSock.fire('message-receipt.update', [delivered('OUT2')]);
+      await settle();
+
+      expect(onMessageAck).toHaveBeenCalledTimes(2);
+      expect(fakeSock.groupMetadata).toHaveBeenCalledTimes(2);
+    });
+
+    it('leaves a message without an ack, and reports nothing wrong, when the group cannot be read', async () => {
+      fakeSock.groupMetadata.mockReset().mockRejectedValueOnce(new Error('item-not-found'));
+      const onMessageAck = await readyWithAcks();
+      fakeSock.fire('message-receipt.update', [delivered('OUT1')]);
+      await settle();
+
+      expect(onMessageAck).not.toHaveBeenCalled();
+      expect(fakeSock.groupMetadata).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('as the roster behind a group delete of a photo that is still being processed', () => {
+    const baileys = jest.requireMock<{ getContentType: jest.Mock; downloadMediaMessage: jest.Mock }>(
+      '@whiskeysockets/baileys',
+    );
+    const ALICE = '628111@s.whatsapp.net';
+    const BOB = '628333@s.whatsapp.net';
+    const roster = (bobIsAdmin: boolean) => ({
+      id: GROUP,
+      subject: 'G',
+      participants: [{ id: ALICE }, { id: BOB, admin: bobIsAdmin ? 'admin' : null }],
+    });
+    const settle = async (): Promise<void> => {
+      for (let hop = 0; hop < 5; hop++) await new Promise(resolve => setImmediate(resolve));
+    };
+
+    /** Alice's photo is still downloading when Bob deletes it. `warm` fills the cache the group sends use first. */
+    const deleteWhileDownloading = async (warm?: boolean) => {
+      baileys.getContentType.mockImplementation(realGetContentType);
+      let finish!: (download: AsyncIterable<Buffer>) => void;
+      baileys.downloadMediaMessage.mockReturnValueOnce(new Promise(resolve => (finish = resolve)));
+      const onMessage = jest.fn();
+      const onMessageRevoked = jest.fn();
+      const adapter = newAdapter();
+      await adapter.initialize({ onMessage, onMessageRevoked });
+      fakeSock.fire('connection.update', { connection: 'open' });
+      if (warm !== undefined) {
+        fakeSock.groupMetadata.mockReset().mockResolvedValue(roster(warm));
+        await socketConfig().cachedGroupMetadata(GROUP);
+      }
+      fakeSock.fire('messages.upsert', {
+        type: 'notify',
+        messages: [
+          {
+            key: { remoteJid: GROUP, fromMe: false, id: 'GONE', participant: ALICE },
+            message: { imageMessage: { mimetype: 'image/jpeg', caption: 'secret caption' } },
+            messageTimestamp: 1700000000,
+          },
+        ],
+      });
+      await settle();
+      fakeSock.fire('messages.upsert', {
+        type: 'notify',
+        messages: [
+          {
+            key: { remoteJid: GROUP, fromMe: false, id: 'REV', participant: BOB },
+            message: { protocolMessage: { key: { id: 'GONE' }, type: 0 } },
+            messageTimestamp: 1700000100,
+          },
+        ],
+      });
+      await settle();
+      finish(streamOf(Buffer.from('IMG')));
+      await settle();
+      return { onMessage, onMessageRevoked };
+    };
+
+    it('is judged by the cache the group sends use, asking WhatsApp for nothing', async () => {
+      const { onMessage, onMessageRevoked } = await deleteWhileDownloading(false);
+
+      expect(onMessage).toHaveBeenCalledWith(expect.objectContaining({ id: 'GONE', body: 'secret caption' }));
+      expect(onMessageRevoked).not.toHaveBeenCalled();
+      expect(fakeSock.groupMetadata).toHaveBeenCalledTimes(1);
+    });
+
+    it('is applied as an admin delete, announcing the photo to no one, when the cache shows an admin', async () => {
+      const { onMessage, onMessageRevoked } = await deleteWhileDownloading(true);
+
+      expect(onMessage).not.toHaveBeenCalled();
+      expect(onMessageRevoked).toHaveBeenCalledWith(expect.objectContaining({ id: 'GONE' }), {
+        fromMe: false,
+        participant: '628333@c.us',
+        admin: true,
+      });
+      expect(fakeSock.groupMetadata).toHaveBeenCalledTimes(1);
+    });
+
+    // His message under the id is stopped as a repeat of the stored one, so the stored message is judged as any
+    // settled one is, by a query when the cache holds no copy of the group (a catch-up flush follows a reconnect).
+    it.each([
+      ['holds no copy of the group', undefined],
+      ['is switched off', '0'],
+    ])(
+      'refuses a delete of a stored message sent with a message under its id, by a query, when the cache %s',
+      async (_case, ttl) => {
+        if (ttl !== undefined) process.env[TTL_ENV] = ttl;
+        baileys.getContentType.mockImplementation(realGetContentType);
+        fakeStore.getMessage.mockResolvedValue({
+          key: { remoteJid: GROUP, fromMe: false, id: 'GONE', participant: ALICE },
+          message: { conversation: 'secret text' },
+        });
+        fakeSock.groupMetadata.mockReset().mockResolvedValue(roster(false));
+        const onMessage = jest.fn();
+        const onMessageRevoked = jest.fn();
+        const adapter = newAdapter();
+        await adapter.initialize({ onMessage, onMessageRevoked });
+        fakeSock.fire('connection.update', { connection: 'open' });
+
+        fakeSock.fire('messages.upsert', {
+          type: 'notify',
+          messages: [
+            {
+              key: { remoteJid: GROUP, fromMe: false, id: 'GONE', participant: BOB },
+              message: { conversation: 'noise' },
+              messageTimestamp: 1700000100,
+            },
+            {
+              key: { remoteJid: GROUP, fromMe: false, id: 'REV', participant: BOB },
+              message: { protocolMessage: { key: { id: 'GONE' }, type: 0 } },
+              messageTimestamp: 1700000101,
+            },
+          ],
+        });
+        await settle();
+
+        expect(onMessageRevoked).not.toHaveBeenCalled();
+        expect(onMessage).not.toHaveBeenCalled();
+        expect(fakeStore.update).not.toHaveBeenCalled();
+        expect(fakeSock.groupMetadata).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    it.each([
+      ['holds no copy of the group', undefined],
+      ['is switched off', '0'],
+    ])('is applied as before, without waiting for a query, when the cache %s', async (_case, ttl) => {
+      if (ttl !== undefined) process.env[TTL_ENV] = ttl;
+      // A query nobody answers: waiting for it would let the photo out before the delete is recorded.
+      fakeSock.groupMetadata.mockReset().mockReturnValue(new Promise(() => undefined));
+
+      const { onMessage, onMessageRevoked } = await deleteWhileDownloading();
+
+      expect(onMessage).not.toHaveBeenCalled();
+      expect(onMessageRevoked).toHaveBeenCalledWith(expect.objectContaining({ id: 'GONE' }), {
+        fromMe: false,
+        participant: '628333@c.us',
+        admin: undefined,
+      });
+      expect(fakeSock.groupMetadata).not.toHaveBeenCalled();
+    });
   });
 });

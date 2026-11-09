@@ -107,6 +107,8 @@ let overrides: {
   saveProfiles?: string[];
   saveGate?: Promise<void>;
   readyFails?: boolean;
+  // Holds the backup export's answer back (an export still being built).
+  exportGate?: Promise<void>;
 } = {};
 
 // ENGINE_TYPE supplied by the container environment, so the dashboard cannot change it.
@@ -206,9 +208,9 @@ function installFetchStub(): void {
       return Promise.resolve(jsonResponse({ status: 'ok', details: {} }));
     }
     if (method === 'GET' && path === '/api/infra/export-data') {
-      return Promise.resolve(
-        jsonResponse({ exportedAt: new Date(0).toISOString(), dataDbType: 'postgres', tables: {}, counts: {} }),
-      );
+      const answer = () =>
+        jsonResponse({ exportedAt: new Date(0).toISOString(), dataDbType: 'postgres', tables: {}, counts: {} });
+      return overrides.exportGate ? overrides.exportGate.then(answer) : Promise.resolve(answer());
     }
     if (method === 'POST' && path === '/api/infra/import-data') {
       return Promise.resolve(jsonResponse({ imported: true, counts: {} }));
@@ -283,6 +285,75 @@ function renderInfrastructure() {
     ),
   );
 }
+
+test('the configuration footer reserves and releases the toast stack space', async t => {
+  const originalObserver = globalThis.ResizeObserver;
+  const originalScroll = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView');
+  const updates = new Set<() => void>();
+  let stackHeight = 100;
+  let revealed = 0;
+  globalThis.ResizeObserver = class {
+    private update: () => void;
+    constructor(callback: ResizeObserverCallback) {
+      this.update = () => callback([], this);
+    }
+    observe() {
+      updates.add(this.update);
+    }
+    unobserve() {}
+    disconnect() {
+      updates.delete(this.update);
+    }
+  };
+  Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+    configurable: true,
+    value() {
+      revealed++;
+    },
+  });
+  t.after(() => {
+    globalThis.ResizeObserver = originalObserver;
+    if (originalScroll) Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', originalScroll);
+    else delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
+  });
+  const getRect = HTMLElement.prototype.getBoundingClientRect;
+  t.mock.method(HTMLElement.prototype, 'getBoundingClientRect', function (this: HTMLElement) {
+    if (this.classList.contains('toast-container')) {
+      return new DOMRect(900, window.innerHeight - stackHeight - 24, 320, stackHeight);
+    }
+    if (this.parentElement?.classList.contains('page-footer'))
+      return new DOMRect(950, window.innerHeight - 70, 250, 44);
+    return getRect.call(this);
+  });
+  const { useToast } = await import('../hooks/useToast.ts');
+  function NoticeControl() {
+    const toast = useToast();
+    return createElement('button', { onClick: () => toast.error('Save refused') }, 'Add notice');
+  }
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 1_000 } } });
+  const { container } = rtl.render(
+    createElement(
+      QueryClientProvider,
+      { client: queryClient },
+      createElement(ToastProvider, null, createElement(Infrastructure), createElement(NoticeControl)),
+    ),
+  );
+  await rtl.screen.findByRole('button', { name: 'Save Configuration' });
+  const footer = container.querySelector<HTMLElement>('.page-footer')!;
+  assert.equal(footer.style.getPropertyValue('--toast-stack-height'), '0px');
+  rtl.fireEvent.click(rtl.screen.getByRole('button', { name: 'Add notice' }));
+  assert.equal(footer.style.getPropertyValue('--toast-stack-height'), '124px');
+  assert.ok(revealed > 0);
+  stackHeight = 180;
+  rtl.act(() => updates.forEach(update => update()));
+  assert.equal(footer.style.getPropertyValue('--toast-stack-height'), '204px');
+  rtl.fireEvent.click(rtl.screen.getByRole('button', { name: 'Close' }));
+  assert.equal(footer.style.getPropertyValue('--toast-stack-height'), '0px');
+  rtl.cleanup();
+  assert.equal(updates.size, 0);
+  const css = readFileSync(new URL('./Infrastructure.css', import.meta.url), 'utf8');
+  assert.match(css, /\.infrastructure-page \.page-footer\s*\{[^}]*padding-bottom:\s*var\(--toast-stack-height, 0px\)/);
+});
 
 // ── Smoke tests ──────────────────────────────────────────────────────────────
 
@@ -513,6 +584,26 @@ test('a successful save opens the restart modal', async () => {
   // unmount) is covered by the last test in this file.
   within(dialog).getByRole('button', { name: 'Restart Now' });
   within(dialog).getByRole('button', { name: 'Restart Later' });
+});
+
+// The restart closes the database and drops open connections, so an export still being built is cut and no
+// backup file arrives, while the failure reads as the connection loss a restart is expected to cause.
+test('Restart Now waits for a backup export in flight', async () => {
+  const { screen, waitFor, fireEvent, within } = rtl;
+  resetFetchCalls();
+  let release: () => void = () => {};
+  overrides = { exportGate: new Promise<void>(resolve => (release = resolve)) };
+  renderInfrastructure();
+
+  await screen.findByText('Database Configuration');
+  fireEvent.click(screen.getByRole('button', { name: 'Export data' }));
+  await waitFor(() => assert.ok(findFetchCall('GET', '/api/infra/export-data')));
+  fireEvent.click(screen.getByRole('button', { name: 'Save Configuration' }));
+
+  const restartNow = within(await screen.findByRole('dialog')).getByRole('button', { name: 'Restart Now' });
+  assert.equal((restartNow as HTMLButtonElement).disabled, true, 'a restart was offered while the export ran');
+  release();
+  await waitFor(() => assert.equal((restartNow as HTMLButtonElement).disabled, false));
 });
 
 const DB_SWITCH_WARNING = 'The new database starts empty.';

@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect, useRef } from 'react';
+import { Fragment, useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Trans, useTranslation } from 'react-i18next';
 import {
@@ -85,6 +85,33 @@ export function Infrastructure() {
   const { data: engines = [] } = useEnginesQuery();
   const { data: currentEngineData } = useCurrentEngineQuery();
   const currentEngine = currentEngineData?.engineType ?? '';
+  const footerRef = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const footer = footerRef.current;
+    const stack = document.querySelector<HTMLElement>('.toast-container');
+    if (!footer || !stack) return;
+    const reserveSpace = () => {
+      const stackRect = stack.getBoundingClientRect();
+      const action = footer.querySelector('button')?.getBoundingClientRect();
+      const overlaps =
+        toast.toasts.length > 0 &&
+        action &&
+        action.bottom > stackRect.top &&
+        action.top < stackRect.bottom &&
+        action.right > stackRect.left &&
+        action.left < stackRect.right;
+      footer.style.setProperty(
+        '--toast-stack-height',
+        toast.toasts.length ? `${window.innerHeight - stackRect.top}px` : '0px',
+      );
+      // Extra scroll space alone would leave an already visible action under a newly added toast.
+      if (overlaps) footer.scrollIntoView({ block: 'end' });
+    };
+    reserveSpace();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(reserveSpace);
+    observer?.observe(stack);
+    return () => observer?.disconnect();
+  }, [loading, configLoading, infraStatus, savedConfig, toast.toasts.length]);
 
   const configForm = useInfraConfigForm(infraStatus, savedConfig);
   const queryClient = useQueryClient();
@@ -96,6 +123,30 @@ export function Infrastructure() {
   }, [savedConfig]);
   const restartFlow = useRestartFlow();
   const dataBackup = useDataBackup();
+  const exportButtonRef = useRef<HTMLButtonElement | null>(null);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+  const restartBackupButtonRef = useRef<HTMLButtonElement | null>(null);
+  const backupFocusRef = useRef<'export' | 'import' | 'restart-export' | null>(null);
+  const wasMigratingRef = useRef(false);
+
+  useEffect(() => {
+    const wasMigrating = wasMigratingRef.current;
+    wasMigratingRef.current = dataBackup.migrating;
+    if (!wasMigrating || dataBackup.migrating) return;
+    const target = backupFocusRef.current;
+    backupFocusRef.current = null;
+    if (document.activeElement !== null && document.activeElement !== document.body) return;
+    const el =
+      target === 'export'
+        ? exportButtonRef.current
+        : target === 'import'
+          ? importInputRef.current
+          : target === 'restart-export'
+            ? restartBackupButtonRef.current
+            : null;
+    // The page may have been scrolled elsewhere while the backup ran; restoring focus must not pull it back.
+    el?.focus({ preventScroll: true });
+  }, [dataBackup.migrating]);
 
   // Reads dbConfig/storageConfig (from configForm) plus infraStatus/savedConfig to decide whether the
   // just-saved config crosses to a different backend, then hands the restart flow everything it needs
@@ -222,6 +273,16 @@ export function Infrastructure() {
     },
   });
 
+  const saveButtonRef = useRef<HTMLButtonElement>(null);
+  const restoreSaveFocus = useRef(false);
+  useEffect(() => {
+    if (configSave.saving || restartFlow.showRestartModal || !restoreSaveFocus.current) return;
+    restoreSaveFocus.current = false;
+    if (document.activeElement === null || document.activeElement === document.body) {
+      saveButtonRef.current?.focus({ preventScroll: true });
+    }
+  }, [configSave.saving, restartFlow.showRestartModal]);
+
   const [queueStats, setQueueStats] = useState({
     webhooks: { pending: 0, completed: 0, failed: 0 } as QueueStats,
   });
@@ -244,7 +305,15 @@ export function Infrastructure() {
         <small>{t('infrastructure.migration.backupHint')}</small>
       </div>
       <div className="data-migration-actions">
-        <button className="btn-secondary btn-sm" onClick={dataBackup.exportBackup} disabled={dataBackup.migrating}>
+        <button
+          ref={exportButtonRef}
+          className="btn-secondary btn-sm"
+          onClick={() => {
+            backupFocusRef.current = 'export';
+            void dataBackup.exportBackup();
+          }}
+          disabled={dataBackup.migrating}
+        >
           {dataBackup.migrating ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
           {t('infrastructure.migration.export')}
         </button>
@@ -252,13 +321,17 @@ export function Infrastructure() {
           <Upload size={14} />
           {t('infrastructure.migration.import')}
           <input
+            ref={importInputRef}
             type="file"
             accept="application/json,.json"
             className="hidden-file-input"
             disabled={dataBackup.migrating}
             onChange={e => {
               const file = e.target.files?.[0];
-              if (file) void dataBackup.importBackup(file);
+              if (file) {
+                backupFocusRef.current = 'import';
+                void dataBackup.importBackup(file);
+              }
               e.target.value = '';
             }}
           />
@@ -619,8 +692,9 @@ export function Infrastructure() {
             ))}
           </div>
 
-          {/* The WhatsApp Web build sessions request as their pin, distinct from the library version above (#488).
-              A page can still run another build; each session logs the one it runs at ready. */}
+          {/* The WhatsApp Web build the gateway resolves for sessions to pin, distinct from the library version above
+              (#488). A session whose pinned page cannot be downloaded or written starts unpinned, and a page can
+              still run another build; each session logs the one it runs at ready. */}
           {infraStatus?.engine.webVersion !== undefined && (
             <p className="engine-web-version">
               {t('infrastructure.engine.webVersion')}:{' '}
@@ -1073,8 +1147,12 @@ export function Infrastructure() {
                     {restartFlow.storageSwitch && <p>{t('infrastructure.migration.storageWarning')}</p>}
                     {restartFlow.dbSwitch && (
                       <button
+                        ref={restartBackupButtonRef}
                         className="btn-secondary btn-sm"
-                        onClick={dataBackup.exportBackup}
+                        onClick={() => {
+                          backupFocusRef.current = 'restart-export';
+                          void dataBackup.exportBackup();
+                        }}
                         disabled={dataBackup.migrating}
                       >
                         {dataBackup.migrating ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
@@ -1088,7 +1166,8 @@ export function Infrastructure() {
                 <button className="btn-secondary" onClick={restartFlow.close}>
                   {t('infrastructure.restart.later')}
                 </button>
-                <button className="btn-primary" onClick={restartFlow.start}>
+                {/* A restart closes the database and drops open connections, so it would cut a backup in flight. */}
+                <button className="btn-primary" onClick={restartFlow.start} disabled={dataBackup.migrating}>
                   {t('infrastructure.restart.now')}
                 </button>
               </div>
@@ -1157,8 +1236,16 @@ export function Infrastructure() {
         </Modal>
       )}
 
-      <footer className="page-footer">
-        <button className="btn-primary large" onClick={configSave.saveConfig} disabled={configSave.saving}>
+      <footer ref={footerRef} className="page-footer">
+        <button
+          ref={saveButtonRef}
+          className="btn-primary large"
+          onClick={event => {
+            restoreSaveFocus.current = document.activeElement === event.currentTarget;
+            void configSave.saveConfig();
+          }}
+          disabled={configSave.saving}
+        >
           {configSave.saving ? <Loader2 className="animate-spin" size={20} /> : <Save size={20} />}
           {configSave.saving ? t('infrastructure.saving') : t('infrastructure.saveConfig')}
         </button>

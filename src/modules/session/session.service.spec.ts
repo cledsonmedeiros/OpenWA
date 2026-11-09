@@ -13,6 +13,7 @@ import {
   GatewayTimeoutException,
   HttpException,
   HttpStatus,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { EngineTransportError } from '../../common/errors/engine-transport.error';
 import { EngineNotSupportedError } from '../../common/errors/engine-not-supported.error';
@@ -21,6 +22,7 @@ import { ConfigService } from '@nestjs/config';
 import { SessionService, AUTOSTART_SHUTDOWN_WAIT_MS, AUTOSTART_THROTTLE_MS } from './session.service';
 import { SessionOwnershipService } from './session-ownership.service';
 import { ShutdownService } from '../../common/services/shutdown.service';
+import { AuditAction } from '../audit/entities/audit-log.entity';
 import {
   SESSION_DELETE_BATCH_MIN_SQLITE,
   SESSION_DELETE_BATCH_SIZE_POSTGRES,
@@ -133,6 +135,9 @@ function chainableQuery(): Record<string, jest.Mock> {
   }
   return query;
 }
+
+/** The number the mock engine is linked to; the stored-message lookups keep only the rows that name it. */
+const OWN_PHONE = '628444';
 
 describe('SessionService', () => {
   let service: SessionService;
@@ -254,6 +259,7 @@ describe('SessionService', () => {
       getContactStatuses: jest.fn().mockResolvedValue([]),
       getChatHistory: jest.fn().mockResolvedValue([]),
       getContactById: jest.fn().mockResolvedValue(null),
+      getPhoneNumber: jest.fn().mockReturnValue(OWN_PHONE),
     };
 
     engineFactory = {
@@ -1975,6 +1981,37 @@ describe('SessionService', () => {
       expect(ownership.release.mock.calls.length).toBeGreaterThan(releasesBefore);
     });
 
+    // A claim that could not be written launched nothing, so the start answers the retryable 503 a delete
+    // answers for the same failure, not a 500.
+    it('start() answers 503 and launches nothing when its claim cannot be written', async () => {
+      const ownership = withOwnership();
+      (repository.findOne as jest.Mock).mockResolvedValue(createMockSession());
+      ownership.claim.mockRejectedValueOnce(new Error('Connection terminated unexpectedly'));
+
+      await expect(service.start('sess-uuid-1', { explicit: true })).rejects.toBeInstanceOf(
+        ServiceUnavailableException,
+      );
+
+      expect(mockEngine.initialize).not.toHaveBeenCalled();
+      expect(lifecycle.isEngineActive('sess-uuid-1')).toBe(false);
+    });
+
+    it('start() answers 503 when the re-claim of its one retry cannot be written', async () => {
+      const ownership = withOwnership();
+      (repository.findOne as jest.Mock).mockResolvedValue(createMockSession());
+      (repository.update as jest.Mock).mockResolvedValue({ affected: 1 });
+      (engineFactory.create as jest.Mock).mockClear().mockReturnValue(mockEngine);
+      mockEngine.initialize.mockRejectedValueOnce(new EngineTransportError('Protocol error: Target closed'));
+      ownership.claim
+        .mockResolvedValueOnce(true)
+        .mockRejectedValueOnce(new Error('Connection terminated unexpectedly'));
+
+      await expect(service.start('sess-uuid-1')).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+      expect(mockEngine.initialize).toHaveBeenCalledTimes(1);
+      expect(lifecycle.isEngineActive('sess-uuid-1')).toBe(false);
+    });
+
     // The same race with a force-kill: the start sent while the engine still ran launched a new one
     // once its claim resolved and cleared the stop record the kill had just written.
     it.each([false, true])('retires a pending start after logout (incomplete: %s)', async incomplete => {
@@ -2500,7 +2537,11 @@ describe('SessionService', () => {
 
     it('logout() releases on the 502-incomplete path too — the engine is down either way', async () => {
       const ownership = withOwnership();
-      jest.spyOn(lifecycle, 'logout').mockRejectedValue(new BadGatewayException('incomplete'));
+      // The 502 comes once the engine was found and torn down, as in SessionEngineControls.logout.
+      jest.spyOn(lifecycle, 'logout').mockImplementation((_id, hooks) => {
+        hooks?.onEngineFound?.();
+        return Promise.reject(new BadGatewayException('incomplete'));
+      });
       jest.spyOn(lifecycle, 'isEngineActive').mockReturnValue(false);
 
       await expect(service.logout('sess-uuid-1')).rejects.toThrow(BadGatewayException);
@@ -2743,7 +2784,7 @@ describe('SessionService', () => {
       ownership.isHeldByOtherNode.mockRejectedValue(new Error('Connection terminated unexpectedly'));
       const stopping = (lifecycle as unknown as { stoppingSessions: Set<string> }).stoppingSessions;
 
-      await expect(call(service)).rejects.toThrow('Connection terminated unexpectedly');
+      await expect(call(service)).rejects.toBeInstanceOf(ServiceUnavailableException);
 
       expect(stopping.has('sess-uuid-1')).toBe(false);
     });
@@ -3091,7 +3132,7 @@ describe('SessionService', () => {
             jest
               .spyOn(ownership, 'isHeldByOtherNode')
               .mockRejectedValueOnce(new Error('Connection terminated unexpectedly')),
-          'Connection terminated unexpectedly',
+          ServiceUnavailableException,
         ],
         [
           'refused for a live peer',
@@ -3168,6 +3209,19 @@ describe('SessionService', () => {
         (repository.findOne as jest.Mock).mockResolvedValue(createMockSession({ id: row.id }));
 
         await expect(call(service, row.id)).rejects.toThrow(BadRequestException);
+
+        expect(await nodeIdOf(row.id)).toBe('dead-node');
+      });
+
+      // A failed read of the row took nothing down either.
+      it.each([
+        ['logout', (s: SessionService, id: string) => s.logout(id)],
+        ['forceKill', (s: SessionService, id: string) => s.forceKill(id)],
+      ])('%s() whose row read fails keeps a lapsed foreign claim', async (_verb, call) => {
+        const row = await seed({ nodeId: 'dead-node', leaseExpiresAt: new Date(Date.now() - 60_000) });
+        (repository.findOne as jest.Mock).mockRejectedValueOnce(new Error('Connection terminated unexpectedly'));
+
+        await expect(call(service, row.id)).rejects.toThrow('Connection terminated unexpectedly');
 
         expect(await nodeIdOf(row.id)).toBe('dead-node');
       });
@@ -5920,6 +5974,66 @@ describe('SessionService', () => {
       });
     });
 
+    // Baileys subscribes a phone through the contact's lid once it knows one, and WhatsApp then reports
+    // presence from that lid, so the report is stored under the lid and not under the id subscribed.
+    describe('a read in another form of the reported chat', () => {
+      const PHONE = '628111222333';
+      const LID = '123456789012345';
+      const report = (chatId: string) => ({ chatId, participants: [{ id: chatId, state: 'composing' as const }] });
+
+      beforeEach(() => {
+        (lidMappingStore.findLidsForPhone as jest.Mock).mockImplementation((phone: string) =>
+          Promise.resolve(phone === PHONE ? [LID] : []),
+        );
+        (lidMappingStore.findPhoneForLid as jest.Mock).mockImplementation((lid: string) =>
+          Promise.resolve(lid.startsWith(LID) ? PHONE : null),
+        );
+      });
+
+      it('serves a report stored under the lid paired with the phone it is read by', async () => {
+        const callbacks = await startAndCapture();
+        callbacks.onPresenceUpdate?.(report(`${LID}@lid`));
+
+        await expect(service.getPresence('sess-uuid-1', `${PHONE}@c.us`)).resolves.toMatchObject(report(`${LID}@lid`));
+      });
+
+      it('serves a report stored under the phone to a read by its lid', async () => {
+        const callbacks = await startAndCapture();
+        callbacks.onPresenceUpdate?.(report(`${PHONE}@c.us`));
+
+        await expect(service.getPresence('sess-uuid-1', `${LID}@lid`)).resolves.toMatchObject(report(`${PHONE}@c.us`));
+      });
+
+      // The subscribe route accepts every spelling of an id, while reports are stored under the neutral one.
+      it.each([`${PHONE}@s.whatsapp.net`, `${PHONE}:12@c.us`, `${PHONE}@C.US`])(
+        'serves a read spelled %s',
+        async id => {
+          const callbacks = await startAndCapture();
+          callbacks.onPresenceUpdate?.(report(`${PHONE}@c.us`));
+
+          await expect(service.getPresence('sess-uuid-1', id)).resolves.toMatchObject(report(`${PHONE}@c.us`));
+        },
+      );
+
+      it('serves the newest report when the phone and its lid both have one', async () => {
+        const callbacks = await startAndCapture();
+        callbacks.onPresenceUpdate?.(report(`${PHONE}@c.us`));
+        await new Promise(resolve => setTimeout(resolve, 5));
+        callbacks.onPresenceUpdate?.(report(`${LID}@lid`));
+
+        await expect(service.getPresence('sess-uuid-1', `${PHONE}@c.us`)).resolves.toMatchObject({
+          chatId: `${LID}@lid`,
+        });
+      });
+
+      it('serves nothing for a lid that is not paired with the phone read', async () => {
+        const callbacks = await startAndCapture();
+        callbacks.onPresenceUpdate?.(report('999999999999999@lid'));
+
+        await expect(service.getPresence('sess-uuid-1', `${PHONE}@c.us`)).resolves.toBeNull();
+      });
+    });
+
     // Subscribed but quiet is a normal state, not a missing resource.
     it('reports null for a chat nothing was reported for', async () => {
       await startAndCapture();
@@ -6159,13 +6273,13 @@ describe('SessionService', () => {
       }
     });
 
-    // The audit row is a disconnect side effect like the webhook and the socket emit, so it belongs
-    // behind the SAME post-await identity fence. Superseding before the call would only exercise the
-    // wiring's entry check, which would pass wherever the emit sat — so supersede the engine while
-    // the handler is parked on its session reload, the one window that discriminates the placement.
-    it('does not audit an unlink from an engine superseded during the async session reload', async () => {
+    // A terminal unlink needs neither the row nor a live engine, so an engine superseded while the handler is
+    // parked on its session reload still has its unlink audited, once, at the post-await fence, and the binding
+    // cleared. Every effect that belongs to the live engine stays behind that fence: no DISCONNECTED write, no
+    // reconnect.
+    it('audits an unlink from an engine superseded during the async session reload without its live effects', async () => {
       const callbacks = await startAndCapture();
-      jest
+      const scheduleReconnect = jest
         .spyOn(lifecycle as unknown as { scheduleReconnect: (id: string, s: unknown) => void }, 'scheduleReconnect')
         .mockImplementation(() => {});
       let resolveReload!: (value: Session | null) => void;
@@ -6185,8 +6299,11 @@ describe('SessionService', () => {
       resolveReload(createMockSession({ status: SessionStatus.READY }));
       await handled;
 
-      expect(auditService.logWarn).not.toHaveBeenCalled();
-      expect(repository.update).not.toHaveBeenCalledWith('sess-uuid-1', { phone: null });
+      expect(auditService.logWarn).toHaveBeenCalledTimes(1);
+      expect(auditService.logWarn).toHaveBeenCalledWith(AuditAction.SESSION_DISCONNECTED, expect.anything());
+      expect(repository.update).toHaveBeenCalledWith('sess-uuid-1', { phone: null });
+      expect(repository.update).not.toHaveBeenCalledWith('sess-uuid-1', { status: SessionStatus.DISCONNECTED });
+      expect(scheduleReconnect).not.toHaveBeenCalled();
     });
 
     it('ignores onReady from an engine that was torn down (post-stop window)', async () => {
@@ -9344,6 +9461,9 @@ describe('SessionService', () => {
   // ── the stored newest message a chat write falls back to (#1891) ──
 
   describe('stored last message lookup', () => {
+    /** The spellings of the engine's number a stored row can name its own side by. */
+    const ownIds = [`${OWN_PHONE}@c.us`, `${OWN_PHONE}@s.whatsapp.net`, OWN_PHONE];
+
     beforeEach(async () => {
       (repository.findOne as jest.Mock).mockResolvedValue(createMockSession());
       (repository.update as jest.Mock).mockResolvedValue({ affected: 1 });
@@ -9387,7 +9507,10 @@ describe('SessionService', () => {
         waMessageId: Not(IsNull()),
         timestamp: Not(IsNull()),
       };
-      expect(whereOf()).toEqual([base]);
+      expect(whereOf()).toEqual([
+        { ...base, direction: MessageDirection.INCOMING, to: In(ownIds) },
+        { ...base, direction: MessageDirection.OUTGOING, from: In(ownIds) },
+      ]);
       expect(messageRepository.findOne).toHaveBeenCalledWith(
         expect.objectContaining({ order: { timestamp: 'DESC', createdAt: 'DESC' } }),
       );
@@ -9422,8 +9545,8 @@ describe('SessionService', () => {
         timestamp: Not(IsNull()),
       };
       expect(whereOf()).toEqual([
-        { ...base, direction: MessageDirection.INCOMING, author: Not(IsNull()) },
-        { ...base, direction: MessageDirection.OUTGOING },
+        { ...base, direction: MessageDirection.INCOMING, to: In(ownIds), author: Not(IsNull()) },
+        { ...base, direction: MessageDirection.OUTGOING, from: In(ownIds) },
       ]);
     });
 
@@ -9474,7 +9597,7 @@ describe('SessionService', () => {
 
     it('for a read receipt, takes only a received message', async () => {
       await expect(lookupOf('sendSeen', () => service.sendSeen('sess-uuid-1', '123@c.us'))).resolves.toBeNull();
-      expect(whereOf()).toEqual([expect.objectContaining({ direction: MessageDirection.INCOMING })]);
+      expect(whereOf()).toEqual([expect.objectContaining({ direction: MessageDirection.INCOMING, to: In(ownIds) })]);
     });
 
     // The query itself, on a real database: the id-form `In`, the group sender rule and the ordering.
@@ -9492,7 +9615,19 @@ describe('SessionService', () => {
           direction: MessageDirection,
           timestamp: number,
           author?: string,
-        ) => ({ sessionId: 'sess-uuid-1', chatId, waMessageId, direction, timestamp, author, from: 'a', to: 'b' });
+        ) => {
+          const sent = direction === MessageDirection.OUTGOING;
+          return {
+            sessionId: 'sess-uuid-1',
+            chatId,
+            waMessageId,
+            direction,
+            timestamp,
+            author,
+            from: sent ? `${OWN_PHONE}@c.us` : chatId,
+            to: sent ? chatId : `${OWN_PHONE}@c.us`,
+          };
+        };
         await messages.insert([
           row('123@c.us', 'OUT', MessageDirection.OUTGOING, 100),
           row('999@lid', 'IN', MessageDirection.INCOMING, 200),

@@ -22,7 +22,8 @@ export function isPluginActiveForSession(
   activeSessions: string[],
   sessionId: string | undefined,
 ): boolean {
-  if (!sessionScoped) return true;
+  // Only an explicit false: the API and dashboard show any other manifest value as session-scoped.
+  if (sessionScoped === false) return true;
   if (sessionId === undefined) return true;
   if (activeSessions.includes('*')) return true;
   return activeSessions.includes(sessionId);
@@ -34,13 +35,24 @@ const isPlainObject = (v: unknown): v is Record<string, unknown> =>
 /**
  * Recursively merge `override` over `base`: nested plain objects merge key-by-key so an override that
  * sets only some keys inherits the rest from the base (incl. nested secrets); arrays and scalars are
- * replaced wholesale. Returns fresh objects; never mutates the inputs.
+ * replaced wholesale. `removeNulls` clears stored built-in overrides at any depth.
+ * Returns fresh objects; never mutates the inputs.
  */
-function deepMerge(base: Record<string, unknown>, override: Record<string, unknown>): Record<string, unknown> {
+export function deepMerge(
+  base: Record<string, unknown>,
+  override: Record<string, unknown>,
+  removeNulls = false,
+): Record<string, unknown> {
   const out: Record<string, unknown> = { ...base };
   for (const [key, value] of Object.entries(override)) {
     const baseValue = out[key];
-    out[key] = isPlainObject(baseValue) && isPlainObject(value) ? deepMerge(baseValue, value) : value;
+    if (removeNulls && value === null) delete out[key];
+    else {
+      out[key] =
+        isPlainObject(value) && (removeNulls || isPlainObject(baseValue))
+          ? deepMerge(isPlainObject(baseValue) ? baseValue : {}, value, removeNulls)
+          : value;
+    }
   }
   return out;
 }

@@ -131,11 +131,13 @@ export class CreateWebhookDto {
     type: String,
     isArray: true,
     minItems: 1,
+    maxItems: WEBHOOK_EVENTS.length + 1,
   })
   @IsOptional()
   @ToStrictArray()
   @IsArray()
   @ArrayMinSize(1)
+  @ArrayMaxSize(WEBHOOK_EVENTS.length + 1)
   // Must include '*' (wildcard subscribe-all) alongside the known events.
   @IsIn([...WEBHOOK_EVENTS, '*'], { each: true })
   events?: string[];
@@ -221,11 +223,13 @@ export class UpdateWebhookDto {
     type: String,
     isArray: true,
     minItems: 1,
+    maxItems: WEBHOOK_EVENTS.length + 1,
   })
   @ValidateIf((_: UpdateWebhookDto, v: unknown) => v !== undefined)
   @ToStrictArray()
   @IsArray()
   @ArrayMinSize(1)
+  @ArrayMaxSize(WEBHOOK_EVENTS.length + 1)
   @IsIn([...WEBHOOK_EVENTS, '*'], { each: true })
   events?: string[];
 
@@ -416,7 +420,10 @@ export class WebhookDeliveryFailureDto {
   @ApiPropertyOptional({
     type: Number,
     nullable: true,
-    description: 'Last HTTP status when the failure was a non-2xx response; null for a network/timeout error.',
+    description:
+      'Last HTTP status when the failure was a non-2xx response; null for a network/timeout error, a blocked ' +
+      'destination, or a redirect (a 3xx answer is not followed, unless WEBHOOK_SSRF_PROTECT=false and ' +
+      'WEBHOOK_SSRF_REDIRECTS=true are both set, and is recorded without its status).',
     example: null,
   })
   lastStatusCode?: number | null;
@@ -479,6 +486,7 @@ export class RedriveWebhookDeliveriesDto {
     minimum: 1,
     maximum: 500,
   })
+  @ToStrictNumber()
   @IsOptional()
   @IsInt()
   @Min(1)
@@ -525,7 +533,13 @@ export class WebhookTestResponseDto {
   @ApiProperty({ description: 'True when the receiver answered 2xx.', example: true })
   success!: boolean;
 
-  @ApiPropertyOptional({ description: 'The HTTP status the receiver answered, when it answered.', example: 200 })
+  @ApiPropertyOptional({
+    description:
+      'The HTTP status the receiver answered, when it answered. A redirect (3xx) is not followed, unless ' +
+      'WEBHOOK_SSRF_PROTECT=false and WEBHOOK_SSRF_REDIRECTS=true are both set, and is reported as an error ' +
+      'with no status.',
+    example: 200,
+  })
   statusCode?: number;
 
   @ApiPropertyOptional({ description: 'The delivery error, when the attempt failed.', example: 'timeout' })

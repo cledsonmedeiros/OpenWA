@@ -58,10 +58,17 @@ const roleNames = ['admin', 'operator', 'viewer'] as const;
 
 const emptyKeyForm = { name: '', role: 'operator', allowedSessions: [] as string[], ips: '', chats: '', expires: '' };
 
+// What the gateway lists for the key seeded from API_MASTER_KEY: its first characters are secret, so none is shown.
+const MASTER_KEY_PREFIX = '(master key)';
+
 // The key this dashboard signed in with: the list only carries each key's prefix, which is the first
-// 12 characters of the raw key.
-function isSignedInKey(apiKey: ApiKey): boolean {
-  return !!apiKey.keyPrefix && !!sessionStorage.getItem('openwa_api_key')?.startsWith(apiKey.keyPrefix);
+// 12 characters of the raw key. The key seeded from API_MASTER_KEY lists a fixed marker instead, so it is the
+// one that no other key's prefix matches.
+function isSignedInKey(apiKey: ApiKey, keys: ApiKey[]): boolean {
+  const signedIn = sessionStorage.getItem('openwa_api_key');
+  if (!signedIn || !apiKey.keyPrefix) return false;
+  if (apiKey.keyPrefix !== MASTER_KEY_PREFIX) return signedIn.startsWith(apiKey.keyPrefix);
+  return !keys.some(other => other.id !== apiKey.id && !!other.keyPrefix && signedIn.startsWith(other.keyPrefix));
 }
 
 // The first IP or chat line the gateway would refuse, so the form can name it instead of the bare
@@ -264,6 +271,8 @@ export function ApiKeys() {
     setShowModal(false);
     setCreatedKey(null);
     setNewKey(emptyKeyForm);
+    // The answer holds the plaintext key too; drop it with the dialog.
+    createMutation.reset();
   };
 
   // A datetime-local with a blank segment reports an empty value, the same as no expiry at all, and
@@ -566,13 +575,18 @@ export function ApiKeys() {
         <Modal
           open
           // The key exists once the request lands, and its secret is shown only here, so the modal
-          // cannot be dismissed until the request settles.
-          onClose={createMutation.isPending ? () => {} : closeCreateModal}
-          hideCloseButton={createMutation.isPending}
+          // cannot be dismissed until the request settles. Once shown, an Escape or a click beside the
+          // dialog must not lose it either: it closes only on its own Close button.
+          onClose={createMutation.isPending || createdKey ? () => {} : closeCreateModal}
+          hideCloseButton={createMutation.isPending || !!createdKey}
           title={createdKey ? t('apiKeys.createdTitle') : t('apiKeys.modalTitle')}
           closeLabel={t('common.close')}
           footer={
-            !createdKey ? (
+            createdKey ? (
+              <button className="btn-primary" onClick={closeCreateModal}>
+                {t('common.close')}
+              </button>
+            ) : (
               <>
                 <button className="btn-secondary" onClick={closeCreateModal} disabled={createMutation.isPending}>
                   {t('common.cancel')}
@@ -581,7 +595,7 @@ export function ApiKeys() {
                   {createMutation.isPending ? <Loader2 className="animate-spin" size={16} /> : t('common.create')}
                 </button>
               </>
-            ) : undefined
+            )
           }
         >
           {createdKey ? (
@@ -689,7 +703,7 @@ export function ApiKeys() {
           <p className="session-scope-edit-name">
             <strong>{editingKey.name}</strong>
           </p>
-          {isSignedInKey(editingKey) && (
+          {isSignedInKey(editingKey, apiKeys) && (
             <p className="key-signed-in-warning" role="note">
               <AlertTriangle size={16} />
               {t('apiKeys.edit.signedIn')}

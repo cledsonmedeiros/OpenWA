@@ -25,10 +25,19 @@ import {
   CONNECTION_REPLACED_REASON,
   LOGOUT_CLEANUP_FAILED_REASON,
 } from '../terminal-engine-failure';
-import { differentWaIds, type BaileysEvents } from './baileys-events';
+import { differentWaIds, keyChatIds, type BaileysEvents } from './baileys-events';
 import type { BaileysHistory } from './baileys-history';
-import type { BaileysSessionStore } from './baileys-session-store';
+import { SESSION_STORE_MAP_CAP_DEFAULT, type BaileysSessionStore } from './baileys-session-store';
+import { ownAccountIds } from './baileys-stored-chat-previews.service';
+import { resolveNonNegativeIntEnv } from '../../config/configuration';
 import { chatKind, userPart } from '../identity/wa-id';
+
+/**
+ * How long a start waits for the stored chats. They serve the listing only, so a read that is slower than
+ * this (a very large table, a busy database) is given up rather than holding the session's start. On SQLite
+ * the read is one synchronous statement, so this clock cannot fire until it has ended.
+ */
+const STORED_PREVIEWS_READ_TIMEOUT_MS = 10_000;
 
 /** Linked-device identity shown in WhatsApp (Settings → Linked Devices). The OS platform is
  * operator-configurable via BAILEYS_BROWSER_NAME; defaults to 'Ubuntu' because some accounts reject a
@@ -163,6 +172,8 @@ export interface BaileysLifecycleHost {
   upsertChats: BaileysSessionStore['upsertChats'];
   /** Drop chats the socket reports deleted (chats.delete). */
   removeChats: BaileysSessionStore['removeChats'];
+  /** List the chats the gateway stored messages of (once, before the first socket opens). */
+  seedStoredPreviews: BaileysSessionStore['seedStoredPreviews'];
   /** Learn lid<->phone mappings pushed by the socket (messaging-history.set, lid-mapping.update). */
   addLidMappings: BaileysSessionStore['addLidMappings'];
   handleMessagesUpsert: BaileysEvents['handleMessagesUpsert'];
@@ -186,6 +197,8 @@ export interface BaileysLifecycleHost {
   getOnQRCode(): EngineEventCallbacks['onQRCode'];
   /** The currently-registered onReady callback, if any (assigned at initialize()). */
   getOnReady(): EngineEventCallbacks['onReady'];
+  /** The currently-registered onPushNameChanged callback, if any (assigned at initialize()). */
+  getOnPushNameChanged(): EngineEventCallbacks['onPushNameChanged'];
   /** The currently-registered onDisconnected callback, if any (assigned at initialize()). */
   getOnDisconnected(): EngineEventCallbacks['onDisconnected'];
   /** The currently-registered onReconnecting callback, if any (assigned at initialize()). */
@@ -232,6 +245,8 @@ export class BaileysLifecycle {
   private pairingTimers: ReturnType<typeof setTimeout>[] = [];
   /** Date.now() of the last close that scheduled a reconnect — input to the stability reset. */
   private lastConnectionCloseAt = 0;
+  /** Set by the first connect, which is the only one that may seed the listing from the stored messages. */
+  private storedPreviewsRead = false;
   /** Lazily loaded @whiskeysockets/baileys module (ESM-only; loaded on first connect, not at boot). */
   private lib?: typeof BaileysLib;
   /** The session proxy's fetch dispatcher, built on first use and closed at teardown. */
@@ -379,6 +394,20 @@ export class BaileysLifecycle {
         return;
       }
     }
+    // A new engine starts with no chats (see BaileysSessionStore). The first connect lists the stored ones
+    // while no socket exists, so no message, edit or delete can come between the read and the seed. A first
+    // link has no account yet and gets its chats from history sync, which the connect after the scan must
+    // not race, so a connect that cannot seed still uses up the one read.
+    if (!this.storedPreviewsRead) {
+      this.storedPreviewsRead = true;
+      const me = state.creds.account ? state.creds.me?.id : undefined;
+      if (me) {
+        await this.seedStoredPreviews(userPart(me));
+        if (this.intentionalClose) {
+          return;
+        }
+      }
+    }
     const version = await this.versionResolver.resolve(b, {
       dispatcher: this.fetchDispatcher(),
       signal: this.teardown.signal,
@@ -408,9 +437,9 @@ export class BaileysLifecycle {
     // An internal reconnect (transient drop) overwrites this.sock WITHOUT going through
     // disconnect/logout/destroy, so the previous socket's WebSocket and the 18 ev listeners we
     // register below would leak on every reconnect. Tear the prior socket down first. Detach OUR
-    // connection.update listener BEFORE end(): Baileys' own end() synchronously emits a synthetic
-    // connection.update {connection:'close'}, which — if still wired — would re-enter
-    // handleConnectionUpdate and schedule a spurious second reconnect.
+    // connection.update listener BEFORE end(): Baileys' own end() emits a synthetic
+    // connection.update {connection:'close'} once the WebSocket has closed, which — if still wired —
+    // would re-enter handleConnectionUpdate and schedule a spurious second reconnect.
     const previous = this.sock;
     if (previous) {
       try {
@@ -503,13 +532,16 @@ export class BaileysLifecycle {
           return stored.message ?? undefined;
         }
         const neutral = (jid: string): string => this.host.toNeutralJid(jid);
-        const chat = [stored.key.remoteJid, stored.key.remoteJidAlt];
+        const chat = keyChatIds(stored.key);
         if (differentWaIds(chat, [key.remoteJid], neutral)) {
           return undefined;
         }
         // A lid the session cannot map cannot be compared with a phone-number chat, so ask Baileys'
         // own mapping (a local store read) for its phone number too. When neither knows it, the retry
-        // is still answered: refusing then would leave a real recipient waiting for good.
+        // is still answered: refusing then would leave a real recipient waiting for good, at the cost of
+        // answering a requester known only by such a lid that holds the id of a phone-number chat's message.
+        // The stored side is not looked up: a message filed under a lid with no number beside it, as the
+        // account's own message typed in a chat addressed by lid is, answers a retry asked by any phone number.
         const lid = key.remoteJid;
         if (lid?.endsWith('@lid') && neutral(lid).endsWith('@lid')) {
           const pn = await this.sock?.signalRepository?.lidMapping?.getPNForLID(lid).catch(() => null);
@@ -557,6 +589,13 @@ export class BaileysLifecycle {
       if (awaitingFirstSync && (update.accountSyncCounter ?? 0) > 0) {
         awaitingFirstSync = false;
         this.scheduleAddressbookRestore(sock);
+      }
+      // A newly linked account's name syncs only after the connection opened (an app-state push name or an
+      // own message), so the one read at open was empty. Before READY the open branch reads it live anyway.
+      const name = update.me?.name;
+      if (name && name !== this.pushName && this.sock === sock && this.status === EngineStatus.READY) {
+        this.pushName = name;
+        this.host.getOnPushNameChanged()?.(name);
       }
     });
     sock.ev.on('connection.update', update => this.handleConnectionUpdate(update));
@@ -1084,7 +1123,8 @@ export class BaileysLifecycle {
         BAILEYS_LOGOUT_ACK_TIMEOUT_MS,
       );
       if (!response) {
-        // query() resolved without a result — WhatsApp did not acknowledge the unlink request.
+        // No answer node: WhatsApp did not acknowledge the unlink request. With the deadline passed to
+        // query(), a timeout rejects instead and reaches the catch below; this guards any other empty answer.
         throw new Error('WhatsApp did not acknowledge the unlink request');
       }
 
@@ -1201,6 +1241,44 @@ export class BaileysLifecycle {
   }
 
   /**
+   * Seed the listing with the newest stored message of each chat of the account `phone`. The rows name
+   * the account in every spelling it was stored under: its JID in either dialect, and the bare digits of
+   * an API send stored before 0.27.0. A send stored before the number was known names no account and does
+   * not count. A read that fails, or that takes longer than {@link STORED_PREVIEWS_READ_TIMEOUT_MS}, leaves
+   * the listing as it was before chats were seeded: it fills from live traffic, and a late answer is
+   * dropped, since the seed is only safe before the socket opens. On SQLite the read blocks the event loop
+   * until it ends, so only a failure leaves the listing unseeded there.
+   */
+  private async seedStoredPreviews(phone: string): Promise<void> {
+    const source = this.host.config.storedChatPreviews;
+    if (!source) return;
+    const limit = resolveNonNegativeIntEnv(
+      process.env.BAILEYS_SESSION_STORE_MAX_ENTRIES,
+      SESSION_STORE_MAP_CAP_DEFAULT,
+    );
+    let giveUp: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const rows = await Promise.race([
+        source.latestPerChat(this.host.config.dbSessionId, ownAccountIds(phone), limit),
+        new Promise<never>((_, reject) => {
+          giveUp = setTimeout(
+            () => reject(new Error(`no answer within ${STORED_PREVIEWS_READ_TIMEOUT_MS} ms`)),
+            STORED_PREVIEWS_READ_TIMEOUT_MS,
+          );
+        }),
+      ]);
+      this.host.seedStoredPreviews(rows);
+    } catch (err) {
+      this.host.logger.warn('Could not read the stored chats; the chat list fills as messages arrive', {
+        sessionId: this.host.config.sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      clearTimeout(giveUp);
+    }
+  }
+
+  /**
    * Drop the stored messages and chat states of the account being unlinked. A failure does not fail the
    * unlink, whose completion is the credential removal that follows, but it is logged: the rows that
    * survive resurface under the next account to link this session (its chat list picks up the old
@@ -1305,7 +1383,19 @@ export class BaileysLifecycle {
       throw new EngineNotReadyError('Session is not waiting to be linked. Start it and wait for the QR stage.');
     }
     const sock = this.sock;
-    const code = await sock.requestPairingCode(phoneNumber);
+    const stopped = (): boolean => this.sock !== sock || this.getStatus() !== EngineStatus.QR_READY;
+    const notWaiting = (): EngineNotReadyError =>
+      new EngineNotReadyError('Session stopped waiting to be linked while the pairing code was requested.');
+    let code: string;
+    try {
+      code = await sock.requestPairingCode(phoneNumber);
+    } catch (error) {
+      // A stop that closes the socket under the request rejects it (Boom 428) instead of resolving it.
+      if (stopped()) throw notWaiting();
+      throw error;
+    }
+    // A stop, logout or new socket while the code was being sent leaves a code nothing can link any more.
+    if (stopped()) throw notWaiting();
     this.armPairingWindow(sock);
     return code;
   }

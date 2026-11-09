@@ -42,7 +42,7 @@ npm --prefix dashboard run test:unit
 | `npm run test:pg-smoke`                                          | Run the PostgreSQL migration and UUID-default smoke test                                                     |
 | `npm run test:scripts`                                           | Run the repo-level script tests on the Node test runner                                                      |
 | `npm run build && npm run test:engine-real`                      | Exercise inbound messages and outbound recipient preparation with the real Baileys library and built adapter |
-| `OPENWA_SMOKE_IMAGE=<image> ./scripts/smoke-test-engine-libs.sh` | Import Baileys and launch the browser inside a built image                                                   |
+| `OPENWA_SMOKE_IMAGE=<image> ./scripts/smoke-test-engine-libs.sh` | Import Baileys, launch the browser, check the image has no TypeScript toolchain and run the migration CLI    |
 | `./scripts/smoke-test-backup-restore.sh`                         | Run the backup/restore smoke test used by the `scripts-smoke` job                                            |
 | `npm run lint`                                                   | Run backend ESLint with type-aware rules                                                                     |
 | `npm run format:check`                                           | Check Prettier formatting for backend source and specs                                                       |
@@ -189,7 +189,7 @@ authoritative gate. Current policy:
 | `src/core/agent-tools/`     | 88%      | 86%       | 91%   | 91%        |
 | `src/core/hooks/`           | 86%      | 88%       | 91%   | 90%        |
 | `src/core/plugins/`         | 80%      | 81%       | 85%   | 84%        |
-| `src/database/`             | 72%      | 80%       | 82%   | 80%        |
+| `src/database/`             | 73%      | 81%       | 82%   | 80%        |
 | `src/engine/adapters/`      | 84%      | 89%       | 91%   | 90%        |
 | `src/engine/identity/`      | 88%      | 93%       | 95%   | 93%        |
 | `src/modules/audit/`        | 75%      | 63%       | 85%   | 85%        |

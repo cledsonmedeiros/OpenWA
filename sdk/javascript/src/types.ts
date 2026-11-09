@@ -606,6 +606,10 @@ export interface ChatHistoryMessage {
   kind: ChatKind;
   /** Disappearing-messages timer on the chat, in seconds. Absent when the chat has none set. */
   ephemeralDuration?: number;
+  /** True when the sender forwarded this message rather than writing it. Absent otherwise. */
+  isForwarded?: boolean;
+  /** How many times the message has been forwarded. Set with `isForwarded`. */
+  forwardingScore?: number;
   /** For group messages, the participant who sent it (`from` is the group JID). */
   author?: Jid;
   mentionedIds?: Jid[];
@@ -672,6 +676,21 @@ export interface ReactionSender {
 export interface ReactionRecord {
   emoji: string;
   senders: ReactionSender[];
+}
+
+export interface MessageReceiptParticipant {
+  participant: Jid;
+  /** Unix timestamp in seconds. */
+  timestamp: number;
+}
+
+export interface MessageReceiptsResponse {
+  delivery: MessageReceiptParticipant[];
+  deliveryRemaining?: number;
+  read: MessageReceiptParticipant[];
+  readRemaining?: number;
+  played: MessageReceiptParticipant[];
+  playedRemaining?: number;
 }
 
 // ── Bulk ──────────────────────────────────────────────────────────
@@ -767,7 +786,11 @@ export interface ContactRecord {
   id: Jid;
   /** The name from the account's own addressbook. Absent for a contact that was never saved. */
   name?: string;
-  /** MSISDN digits, without a leading + or any separators. */
+  /**
+   * MSISDN digits, without a leading + or any separators, for a `<phone>@c.us` contact. For a `<lid>@lid`
+   * contact it depends on the engine: Baileys carries the phone's digits when the phone is known and an empty
+   * string when it is not; whatsapp-web.js carries the lid's digits, which are not a phone number.
+   */
   number: string;
   /** The name the contact set on their own account. Both engines emit this as `pushName`. */
   pushName?: string;
@@ -811,6 +834,16 @@ export interface ContactPhoneResponse {
   phone: string | null;
 }
 
+export interface ContactLidResponse {
+  /** The number exactly as supplied in the path. */
+  number: string;
+  /**
+   * The `<lid>@lid` WhatsApp holds for the number, or `null` when it holds none. An unregistered number answers
+   * `null` too; `contacts.check` tells the two apart.
+   */
+  lid: string | null;
+}
+
 // ── Group ─────────────────────────────────────────────────────────
 
 export interface GroupParticipant {
@@ -846,7 +879,7 @@ export interface GroupInfo {
   locked?: boolean;
   /** Who may add participants. Absent when the engine did not report it. */
   memberAddMode?: 'all' | 'admins';
-  owner?: Jid | null;
+  owner?: Jid;
   /** Unix timestamp in seconds. */
   createdAt?: number;
   participants: GroupParticipant[];
@@ -1515,8 +1548,10 @@ export interface SendProductRequest {
 
 /**
  * How `q` matches: `word` (the server default) matches whole words; `contains` matches any part of a
- * word, ignoring case and accents, and needs at least one term of 3+ characters and a server with
- * `SEARCH_CONTAINS_ENABLED=true` (501 otherwise).
+ * word, ignoring case and accents. `contains` needs `SEARCH_CONTAINS_ENABLED=true` and a finished index
+ * build on the server (501 otherwise) and at least one term of 3+ characters with at most 64 characters
+ * across its terms (400 otherwise); it ranks the 1000 most recently stored matches, so `total` is at
+ * most 1000.
  */
 export type SearchMatch = 'word' | 'contains';
 

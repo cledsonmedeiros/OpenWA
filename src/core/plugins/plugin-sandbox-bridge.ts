@@ -20,10 +20,14 @@ import { countMetaValues, metaText } from './sandbox-log-meta';
 import { makeOnWebhookSubscribe } from './webhook-subscribe.util';
 import { registerPluginSearchProvider, unregisterPluginSearchProvider } from './search-provider-registration.util';
 import { INGRESS_DISPATCH_TIMEOUT_MS } from '../../modules/integration/integration.constants';
+import { ingressDeliveryVerified, isQueryBorne } from '../../modules/integration/ingress-signature';
 import type { IngressJobData } from '../../modules/queue/processors/ingress.processor';
+import { resolveFeatureFlags } from '../../config/feature-flags';
 
 /** Time budget for a sandboxed plugin's hook handler before the chain proceeds without it. */
 const SANDBOX_HOOK_TIMEOUT_MS = 5000;
+/** Keep queued dispatch below BullMQ's default 30 s job lock. */
+const SANDBOX_QUEUED_WEBHOOK_MAX_MS = 25000;
 /** A sandboxed plugin's healthCheck must answer within this, else it's reported unhealthy (not hung). */
 const SANDBOX_HEALTH_TIMEOUT_MS = 5000;
 /** A sandboxed plugin's search handler must answer within this, else /search fails fast (not hung). */
@@ -189,7 +193,7 @@ export class PluginSandboxBridge {
    * since, or when the worker's handler itself reports
    * failure (`!result.ok`, e.g. a 502/504/500) — either way BullMQ's retry/DLQ machinery takes over.
    */
-  async dispatchWebhookForInstance(d: IngressJobData): Promise<void> {
+  async dispatchWebhookForInstance(d: IngressJobData, options?: { queued?: boolean }): Promise<void> {
     const host = this.sandboxHosts.get(d.pluginId);
     if (!host) {
       throw new Error('no live sandbox host for plugin ' + d.pluginId);
@@ -204,7 +208,15 @@ export class PluginSandboxBridge {
     // The verdict is the one recorded at admission: a plugin update can change the route's scheme while
     // a delivery waits, and it must not relabel a payload nobody authenticated. A delivery admitted before
     // the verdict was recorded reads the route as it stands. Missing/hot-swapped route metadata fails closed.
-    const verified = !!route && (d.payload.admission?.verified ?? route.signature.scheme !== 'none');
+    // A recorded verdict is still withdrawn for a query-borne delivery on a signing route: earlier releases recorded
+    // those as verified, though no signature covers the query.
+    const recorded = d.payload.admission?.verified;
+    const verified =
+      !!route &&
+      (recorded === undefined
+        ? ingressDeliveryVerified(route.signature.scheme, d.payload.rawBody, d.payload.query)
+        : recorded &&
+          (route.signature.scheme === 'shared-secret' || !isQueryBorne(d.payload.rawBody, d.payload.query)));
     const instance = await this.hostServices.getPluginInstancePort().resolve(d.pluginId, d.instanceId);
     // The live door and the reconciler refuse an unknown or disabled instance; a queued job, a retry,
     // the inline fallback and a redrive all land here instead, so the same rule is enforced once more.
@@ -269,10 +281,15 @@ export class PluginSandboxBridge {
       body: d.payload.body,
       rawBody: d.payload.rawBody,
       verified,
-      deliveryId: d.deliveryId,
+      deliveryId: d.payload.providerDeliveryId ?? d.deliveryId,
       sessionId: d.sessionId,
       config,
-      timeoutMs: INGRESS_DISPATCH_TIMEOUT_MS,
+      timeoutMs: options?.queued
+        ? Math.min(
+            SANDBOX_QUEUED_WEBHOOK_MAX_MS,
+            resolveFeatureFlags(this.configService).simulateTypingMaxMs + INGRESS_DISPATCH_TIMEOUT_MS,
+          )
+        : INGRESS_DISPATCH_TIMEOUT_MS,
     });
     if (!result.ok) {
       throw new Error(result.error ?? 'ingress dispatch failed with status ' + result.status);
@@ -642,9 +659,13 @@ export class PluginSandboxBridge {
   // a manifest without 'search:provide' is denied there — the wire declaration is untrusted input, and
   // this bridge bypasses the capability router that gates the ctx.* capabilities.
   private buildSearchProviderRegistrar(pluginId: string, plugin: PluginInstance): () => void {
+    // One declaration per worker. Plugin code can post the message itself, and every repeat would take the active
+    // provider back in auto mode, or log the denial again.
+    let declared = false;
     return (): void => {
       const liveHost = this.sandboxHosts.get(pluginId);
-      if (!liveHost) return;
+      if (!liveHost || declared) return;
+      declared = true;
       registerPluginSearchProvider({
         pluginId,
         label: `${plugin.manifest.name} (plugin)`,

@@ -10,6 +10,8 @@ import { createElement } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 let webhooksStatus = 200;
+// What a 403 on the list says: by default the role refusal.
+let forbiddenMessage = 'Insufficient permissions. Required: operator';
 let webhookReads = 0;
 let webhookList: unknown[] = [];
 let sessionList: unknown[] = [];
@@ -61,7 +63,7 @@ function installFetchStub(): void {
     if (path === '/api/webhooks') {
       webhookReads++;
       if (webhooksStatus === 403) {
-        return Promise.resolve(jsonResponse({ message: 'Insufficient permissions. Required: operator' }, 403));
+        return Promise.resolve(jsonResponse({ message: forbiddenMessage }, 403));
       }
       if (webhooksStatus !== 200) return Promise.resolve(jsonResponse({ message: 'database offline' }, 500));
       return Promise.resolve(jsonResponse(webhookList));
@@ -124,6 +126,21 @@ test('a 403 on the webhook list shows a permission state, not an empty list', as
   renderWebhooks();
   await rtl.screen.findByText('No access to webhooks');
   assert.ok(!rtl.screen.queryByText('No webhooks configured'), 'a refused read claimed there are no webhooks');
+});
+
+// The page knows the key's role allows webhooks, so a refusal it did not predict has another cause, such as a key
+// restricted to selected chats, which no webhook route admits. Role copy sent that operator looking for a role.
+test('a 403 for a key whose role allows webhooks gives the gateway reason, not role copy', async () => {
+  webhooksStatus = 403;
+  forbiddenMessage = 'API key is restricted to selected chats';
+  try {
+    renderWebhooks();
+    await rtl.screen.findByText('No access to webhooks');
+    rtl.screen.getByText('API key is restricted to selected chats');
+    assert.equal(rtl.screen.queryByText('Webhooks require an API key with the operator or admin role.') === null, true);
+  } finally {
+    forbiddenMessage = 'Insufficient permissions. Required: operator';
+  }
 });
 
 test('a viewer key is shown the permission state without a list request the gateway would refuse', async () => {
@@ -329,6 +346,36 @@ test('Create stays disabled with a hint while no event is selected', async () =>
   assert.equal(create.disabled, false);
 });
 
+// The gateway takes an http(s) URL of at most 2048 characters. Anything else was sent, and a production gateway, which
+// hides validation detail, answered "Failed to create webhook: Bad Request", naming no field.
+const LONG_URL = `https://example.test/${'a'.repeat(2030)}`;
+for (const [url, hint] of [
+  ['example.com/hook', 'Use a full http:// or https:// address, like https://example.com/webhook.'],
+  ['localhost:3000/hook', 'Use a full http:// or https:// address, like https://example.com/webhook.'],
+  ['ftp://example.com/hook', 'Use a full http:// or https:// address, like https://example.com/webhook.'],
+  ['http://n8n_main:5678/webhook/x', 'Use a full http:// or https:// address, like https://example.com/webhook.'],
+  ['https://hooks.example.com/a b', 'Use a full http:// or https:// address, like https://example.com/webhook.'],
+  ['https://hooks.example.com/?x=<value>', 'Use a full http:// or https:// address, like https://example.com/webhook.'],
+  [LONG_URL, `Limited to 2048 characters (${LONG_URL.length} now).`],
+] as const) {
+  test(`Create holds a URL the gateway refuses, and says why (${url.slice(0, 24)})`, async () => {
+    const { screen, fireEvent } = rtl;
+    webhooksStatus = 200;
+    sessionList = [{ id: 'sess-1', name: 'Main', status: 'ready', createdAt: '2026-01-01T00:00:00.000Z' }];
+    window.sessionStorage.setItem('openwa_user_role', 'operator');
+    renderWebhooks();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Add Webhook' }));
+    const sessionSelect = screen.getByLabelText<HTMLSelectElement>('Session');
+    await rtl.findByText(sessionSelect, 'Main');
+    fireEvent.change(sessionSelect, { target: { value: 'sess-1' } });
+    fireEvent.change(screen.getByLabelText('URL'), { target: { value: url } });
+    const create = screen.getByRole<HTMLButtonElement>('button', { name: 'Create' });
+    assert.equal(create.disabled, true, 'Create was offered for a URL the gateway refuses');
+    screen.getByText(hint);
+  });
+}
+
 async function openEditModal(): Promise<HTMLButtonElement> {
   webhooksStatus = 200;
   webhookList = [
@@ -348,6 +395,25 @@ async function openEditModal(): Promise<HTMLButtonElement> {
   return rtl.screen.getByRole<HTMLButtonElement>('button', { name: 'Save Changes' });
 }
 
+for (const url of ['http://n8n_main:5678/webhook/x', 'https://hooks.example.com/a b', 'https://example.test/?x=>']) {
+  test(`Save holds a URL the gateway refuses (${url})`, async () => {
+    const save = await openEditModal();
+    rtl.fireEvent.change(rtl.screen.getByLabelText('URL'), { target: { value: url } });
+    assert.equal(save.disabled, true);
+    rtl.screen.getByText('Use a full http:// or https:// address, like https://example.com/webhook.');
+  });
+}
+
+test('a webhook URL with underscores in its path and encoded spaces is sent unchanged', async () => {
+  const url = 'https://example.test/path_name?q=some%20text&other=a_b';
+  const save = await openEditModal();
+  rtl.fireEvent.change(rtl.screen.getByLabelText('URL'), { target: { value: url } });
+  assert.equal(save.disabled, false);
+  rtl.fireEvent.click(save);
+  await rtl.waitFor(() => assert.equal(updateCalls, 1));
+  assert.equal(updateBody?.url, url);
+});
+
 test('Save stays disabled with a hint while no event is selected', async () => {
   const { screen, fireEvent } = rtl;
   const save = await openEditModal();
@@ -359,6 +425,18 @@ test('Save stays disabled with a hint while no event is selected', async () => {
   fireEvent.click(save);
   await new Promise(resolve => setTimeout(resolve, 50));
   assert.equal(updateCalls, 0);
+});
+
+// A URL stored before the gateway required a scheme is sent back on every save and refused with a bare "Bad Request",
+// so the edit says what is wrong with it instead of failing each time.
+test('Save holds a stored URL the gateway now refuses, and says why', async () => {
+  const { screen, fireEvent } = rtl;
+  const save = await openEditModal();
+  fireEvent.change(screen.getByLabelText('URL'), { target: { value: 'example.com/hook' } });
+  assert.equal(save.disabled, true, 'Save was offered for a URL the gateway refuses');
+  screen.getByText('Use a full http:// or https:// address, like https://example.com/webhook.');
+  fireEvent.change(screen.getByLabelText('URL'), { target: { value: 'https://example.com/hook' } });
+  assert.equal(save.disabled, false);
 });
 
 test('Save stays disabled while the URL is empty', async () => {

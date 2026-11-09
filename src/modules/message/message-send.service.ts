@@ -32,6 +32,7 @@ import { ChatMediaArchiveService } from '../chat-media/chat-media-archive.servic
 import { LidMappingStoreService } from '../../engine/identity/lid-mapping-store.service';
 import { resolveJidCandidates } from '../../engine/identity/jid-candidates';
 import { captureSessionWrites, SessionWriteScope } from '../../common/utils/session-write-scope';
+import { MEDIA_MESSAGE_TYPES, OMITTED_MEDIA } from '../session/message-row.mapper';
 
 /** Default cap on a rendered template's final text; overridable via TEMPLATE_RENDER_MAX_CHARS. */
 export const DEFAULT_TEMPLATE_RENDER_MAX_CHARS = 64 * 1024;
@@ -312,7 +313,7 @@ export class MessageSendService {
     const maxChars =
       this.configService?.get<number>('template.renderMaxChars', DEFAULT_TEMPLATE_RENDER_MAX_CHARS) ??
       DEFAULT_TEMPLATE_RENDER_MAX_CHARS;
-    let text: string;
+    let rendered: string[];
     try {
       const length =
         parts.reduce((sum, part) => sum + renderedLength(part, vars), 0) +
@@ -322,11 +323,15 @@ export class MessageSendService {
           `Rendered template is ${length} characters, over the ${maxChars}-character limit`,
         );
       }
-      text = parts.map(part => renderTemplate(part, vars)).join(separator);
+      rendered = parts.map(part => renderTemplate(part, vars));
     } catch (error) {
       if (error instanceof TemplateRenderError) throw new BadRequestException(error.message);
       throw error;
     }
+    // send-text refuses an empty text before anything is stored or sent; a render that leaves none is the same. Each
+    // part is tested, not the joined text: the separator between empty parts would make it non-empty.
+    if (rendered.every(part => !part)) throw new BadRequestException('Rendered template is empty');
+    const text = rendered.join(separator);
 
     return this.sendText(sessionId, {
       chatId: dto.chatId,
@@ -668,10 +673,14 @@ export class MessageSendService {
     sessionId: string,
     dto: { fromChatId: string; toChatId: string; messageId: string },
   ): Promise<MessageResponseDto> {
-    const { message, finalDto, engine } = await this.applySendingGate(sessionId, 'forward', dto, finalDto => ({
+    // The row carries what is forwarded: the own-send echo that also carries it loses the insert race to this
+    // row whenever the send path writes the engine id first, so a placeholder stored here stayed for good.
+    const { message, finalDto, engine } = await this.applySendingGate(sessionId, 'forward', dto, async finalDto => ({
       chatId: finalDto.toChatId,
-      body: '[Forwarded]',
-      type: 'forward',
+      ...((await this.storedForwardContent(sessionId, finalDto.fromChatId, finalDto.messageId)) ?? {
+        body: '[Forwarded]',
+        type: 'forward',
+      }),
     }));
 
     let result: MessageResult;
@@ -725,6 +734,46 @@ export class MessageSendService {
     } catch (err) {
       this.logger.warn(`Failed to resolve quoted message ${quotedMessageId}`, { error: String(err) });
       return '';
+    }
+  }
+
+  /**
+   * The type, text and media of the message a forward copies, from its row in `fromChatId` (any of the chat's
+   * phone, lid or group forms, as for a quote), or undefined when no such row is stored, it was revoked, or the
+   * read fails. A quote or mention it carried is not copied: the forwarded copy has neither. Media the source row
+   * holds no bytes for is stored as the omitted marker, as the echo and history paths store it, without an archive
+   * pointer that names the source row's file; it never replaces an echo's bytes (see mergeSentMetadata).
+   */
+  private async storedForwardContent(
+    sessionId: string,
+    fromChatId: string,
+    messageId: string,
+  ): Promise<Pick<SaveOutgoingMessageData, 'body' | 'type' | 'metadata'> | undefined> {
+    try {
+      const store = this.lidMappingStore;
+      const expanded = await resolveJidCandidates(
+        fromChatId,
+        store && {
+          resolveLid: lid => store.findPhoneForLid(lid),
+          lidsForPhone: phone => store.findLidsForPhone(phone),
+        },
+      );
+      const source = await this.messageRepository.findOne({
+        where: { sessionId, chatId: In([...new Set([fromChatId, ...expanded])]), waMessageId: messageId },
+      });
+      if (!source || source.type === 'revoked') return undefined;
+      const { media, poll } = (source.metadata ?? {}) as { media?: Record<string, unknown>; poll?: unknown };
+      let copied = typeof media?.data === 'string' && media.data ? media : undefined;
+      if (!copied && MEDIA_MESSAGE_TYPES.has(source.type)) {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { data, archived, ...kept } = media ?? {};
+        copied = { ...OMITTED_MEDIA, ...kept, omitted: true };
+      }
+      const metadata = { ...(copied ? { media: copied } : {}), ...(poll ? { poll } : {}) };
+      return { type: source.type, body: source.body, metadata: Object.keys(metadata).length ? metadata : undefined };
+    } catch (err) {
+      this.logger.warn(`Failed to read forwarded message ${messageId}`, { error: String(err) });
+      return undefined;
     }
   }
 
@@ -899,6 +948,9 @@ export class MessageSendService {
     if (result.id) message.waMessageId = result.id;
     message.status = MessageStatus.SENT;
     message.timestamp = result.timestamp;
+    // Set when the row was no longer PENDING at the first write: the pending reaper failed it while the engine answered.
+    // The reaper can also fail it later, while the echo merge below is tried; the recovery there covers both.
+    let reaped = false;
     try {
       // No transaction of its own, for the reason given at the first save of this message.
       const sent: QueryDeepPartialEntity<Message> = {
@@ -916,6 +968,7 @@ export class MessageSendService {
         sent,
       );
       if (!updated.affected) {
+        reaped = true;
         updated = await this.messageRepository.update(
           { id: message.id, sessionId: message.sessionId },
           { ...sent, metadata: message.metadata as QueryDeepPartialEntity<Record<string, unknown>> },
@@ -959,17 +1012,32 @@ export class MessageSendService {
         if (!metadataMerged) {
           // Keep the payload-bearing row when the echo merge fails. Mark it SENT without the
           // conflicting engine id so the pending reaper cannot strip successfully sent media. This is the
-          // row that survives, so it carries what the send resolved too (a clicked button's label).
-          await this.messageRepository
-            .update(
-              { id: message.id, status: MessageStatus.PENDING },
-              { status: MessageStatus.SENT, timestamp: result.timestamp, ...changed },
-            )
-            .catch(err =>
+          // row that survives, so it carries what the send resolved too (a clicked button's label). A row the
+          // reaper failed first, before the first write above or while the merge was tried, is FAILED and
+          // lost its payload: the write guarded on PENDING then matches nothing, and the row is marked SENT
+          // from the copy this send still holds instead.
+          const keep = (status: MessageStatus, payload: QueryDeepPartialEntity<Message>) =>
+            this.messageRepository.update({ id: message.id, status }, payload).catch(err => {
               this.logger.warn(`Preserving the sent media row failed (id=${message.id})`, {
                 error: err instanceof Error ? err.message : String(err),
-              }),
-            );
+              });
+              return undefined;
+            });
+          const kept = reaped
+            ? undefined
+            : await keep(MessageStatus.PENDING, {
+                status: MessageStatus.SENT,
+                timestamp: result.timestamp,
+                ...changed,
+              });
+          if (reaped || kept?.affected === 0) {
+            await keep(MessageStatus.FAILED, {
+              status: MessageStatus.SENT,
+              timestamp: result.timestamp,
+              ...changed,
+              metadata: message.metadata as QueryDeepPartialEntity<Record<string, unknown>>,
+            });
+          }
           const retained = await this.messageRepository.findOne({ where: { id: message.id } }).catch(() => null);
           if (retained) this.emitPersisted(message.sessionId, retained);
           return { messageId: result.id, timestamp: result.timestamp };

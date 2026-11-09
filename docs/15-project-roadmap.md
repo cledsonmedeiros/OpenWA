@@ -40,7 +40,7 @@ timeline
                  : Bundled Traefik removed
                  : Bring-your-own reverse proxy
 
-    section v0.5.0-v0.26.x - Incremental Releases (Released)
+    section v0.5.0-v0.29.x - Incremental Releases (Released)
         Jun-Oct 2026 : Integration Fabric provisioning
                      : Java & Go SDKs
                      : Live message edits
@@ -82,7 +82,7 @@ timeline
 | v0.10.x | Chat `kind` discriminator, 24-hour status store, Docker Hub dual-publish                             | ✅ Released |
 | v0.11.0 | SDK poll / profile-picture / status-media coverage, security & reliability hardening                 | ✅ Released |
 | v0.12.x | Session/engine decomposition (`EngineRegistry`), plugin lifecycle and configuration-precedence fixes | ✅ Released |
-| v0.13+  | Incremental releases through v0.26.x; see `CHANGELOG.md`                                             | ✅ Released |
+| v0.13+  | Incremental releases through v0.29.x; see `CHANGELOG.md`                                             | ✅ Released |
 | v1.0.0  | Enterprise Ready (K8s Operator, multi-tenant)                                                        | 📋 Planned  |
 
 > SDK / docs-site / observability features are delivered **incrementally** as they're additive — they no
@@ -529,10 +529,10 @@ flowchart LR
         V020[v0.2.0 - i18n, Real-time Chats,<br/>Webhook Delivery-state & Hardening]
     end
 
-    subgraph v0.x["✅ Released (v0.3-v0.26.x)"]
+    subgraph v0.x["✅ Released (v0.3-v0.29.x)"]
         V030[v0.3.0 - Engine Pluggability<br/>Baileys engine + plugin layer]
         V040[v0.4.0 - Single-Port Deployment<br/>Dashboard on API port, no bundled Traefik]
-        V011[v0.5.0-v0.26.x - Incremental releases<br/>see the CHANGELOG]
+        V011[v0.5.0-v0.29.x - Incremental releases<br/>see the CHANGELOG]
     end
 
     subgraph v1.x["v1.x Series - Enterprise"]
@@ -660,6 +660,13 @@ PR, and pushing the tag from `main` hands everything else to `.github/workflows/
 - The amd64 image's Chrome for Testing pin (`chrome@<version>` in the `Dockerfile`) is the current
   Stable in `last-known-good-versions.json`. Nothing else refreshes it and no image scan sees it, so
   bump it on `main` first, as the comment above that install describes.
+- Name the version wherever the text was written before it was known, in a docs commit on `main` ahead of
+  the release commit: every `next` in the Release column of the Known Upgrade Hazards table in
+  `docs/14-migration-guide.md`, one for each hazard the release added, and every clause that says
+  "after OpenWA <last>", "the release after <last>" or "newer than <last>", such as line 3 of
+  `sdk/README.md`, `docs/18-sdk-design.md` and the SDK READMEs, which becomes "<version> or later".
+  `npm run test:docs` fails on a `next` row once `[Unreleased]` is empty, so a release commit that
+  skips this fails its own CI.
 
 ### The release commit
 

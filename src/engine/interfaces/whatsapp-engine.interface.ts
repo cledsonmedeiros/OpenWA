@@ -56,7 +56,11 @@ export interface Quotable {
 export interface MediaInput extends Quotable {
   mimetype: string;
   data: Buffer | string; // Buffer or base64 or URL
-  /** Caller-supplied filename wins. Document sends fall back to 'file' when omitted (wwebjs first derives the URL basename); image/video/audio sends carry no filename. */
+  /**
+   * Caller-supplied filename wins. A document falls back to 'file' when omitted (wwebjs first derives the URL
+   * basename), except a whatsapp-web.js document to a status or broadcast list, which goes out without one.
+   * Image/video/audio sends carry no filename.
+   */
   filename?: string;
   caption?: string;
   /** Neutral WIDs (`<phone>@c.us`) to @mention in the caption. The adapter de-normalizes per engine. */
@@ -131,6 +135,13 @@ export interface IncomingMessage {
   author?: string;
   /** WIDs @mentioned in the message (empty/absent when none). Surfaced for command targeting. */
   mentionedIds?: string[];
+  /**
+   * True when the sender forwarded this message rather than writing it. Absent (never `false`) for a
+   * message that was not forwarded, so consumers can treat the key's presence as the signal.
+   */
+  isForwarded?: boolean;
+  /** How many times the message has been forwarded; WhatsApp flags a widely forwarded one at 5 or more. Set with `isForwarded`. */
+  forwardingScore?: number;
   /** Set for `call` (call_log) messages: video vs voice, and whether an incoming call went unanswered. */
   call?: { video: boolean; missed: boolean };
   /**
@@ -253,6 +264,10 @@ export interface Contact {
   id: string;
   name?: string;
   pushName?: string;
+  /**
+   * MSISDN digits for a `<phone>@c.us` id. For a `<lid>@lid` id: Baileys gives the phone's digits when the phone is
+   * known and '' when it is not; whatsapp-web.js gives the lid's digits, which are not a phone number.
+   */
   number: string;
   isMyContact: boolean;
   isBlocked: boolean;
@@ -270,6 +285,7 @@ export interface Group {
 
 export interface GroupParticipant {
   id: string;
+  /** MSISDN digits for a `<phone>@c.us` id; the lid's digits (not a phone number) for a `<lid>@lid` id. */
   number: string;
   name?: string;
   isAdmin: boolean;
@@ -431,6 +447,20 @@ export interface MessageReaction {
   senders: ReactionSender[];
 }
 
+export interface MessageReceiptParticipant {
+  participant: string;
+  timestamp: number;
+}
+
+export interface MessageReceipts {
+  delivery: MessageReceiptParticipant[];
+  deliveryRemaining?: number;
+  read: MessageReceiptParticipant[];
+  readRemaining?: number;
+  played: MessageReceiptParticipant[];
+  playedRemaining?: number;
+}
+
 // Phase 3: Labels (WhatsApp Business)
 export interface Label {
   id: string;
@@ -488,9 +518,12 @@ export interface StatusPostOptions {
    * whatsapp-web.js, which broadcasts to the account's status-privacy audience.
    */
   recipients?: string[];
-  /** Hex background colour (#RRGGBB). Honoured on text and voice statuses (Baileys engine). */
+  /** Hex background colour (#RRGGBB). Honoured on text statuses by both engines, and on voice statuses by Baileys. */
   backgroundColor?: string;
-  /** Font index. Honoured on text and voice statuses (Baileys engine). */
+  /**
+   * Font index. Honoured on text statuses by both engines (whatsapp-web.js clamps anything above 7 to the
+   * default), and on voice statuses by Baileys.
+   */
   font?: number;
   /** Caption. Image/video status only. */
   caption?: string;
@@ -868,7 +901,7 @@ export type CallOutcome = 'accepted' | 'rejected' | 'missed';
 /**
  * A call that was ringing has ended.
  *
- * The engines report the outcome but not WHO caused it: an accept can come from any of the account's
+ * Baileys reports the outcome but not WHO caused it: an accept can come from any of the account's
  * linked devices, and a reject can equally be the account declining or WhatsApp giving up. So this
  * says what happened to the call, never who did it.
  */
@@ -953,6 +986,12 @@ export interface EngineEventCallbacks {
   onQRCode?: (qr: string) => void;
   onReady?: (phone: string, pushName: string) => void;
   /**
+   * Fired while ready when the account's own push name becomes known or changes, with the new non-empty
+   * name. Baileys only: a newly linked account's name syncs after the connection opened, so its `onReady`
+   * carried an empty one. whatsapp-web.js knows the name at ready and never fires it.
+   */
+  onPushNameChanged?: (pushName: string) => void;
+  /**
    * Set only where a downloaded payload outlives the emit (PostgreSQL writes asynchronously). The
    * engine calls it synchronously as each live message arrives, in arrival order, and passes the
    * ticket to the emit, or drops it when the message is not emitted. `needsRoom` says whether the
@@ -999,9 +1038,15 @@ export interface EngineEventCallbacks {
   onMessageReceipt?: (event: MessageReceiptEvent) => void;
   /**
    * `actor.fromMe` says whether the account itself made the revoke (from its phone). Only an engine that
-   * receives the raw protocol message can say; whatsapp-web.js leaves it out.
+   * receives the raw protocol message can say; whatsapp-web.js leaves it out. The payload of a status post's
+   * delete names no sender, so there `actor.participant` is the neutral id of the contact who sent it. For a
+   * group revoke a member sent, `actor.participant` is that member's neutral id and `actor.admin` whether the
+   * group's roster shows them an admin, undefined when the engine did not read it or it could not say.
    */
-  onMessageRevoked?: (message: RevokedMessage, actor?: { fromMe: boolean }) => void;
+  onMessageRevoked?: (
+    message: RevokedMessage,
+    actor?: { fromMe: boolean; participant?: string; admin?: boolean },
+  ) => void;
   onMessageReaction?: (event: ReactionEvent) => void;
   onMessageEdited?: (message: EditedMessage) => void;
   /**
@@ -1087,7 +1132,8 @@ export interface EngineEventCallbacks {
   /**
    * Fired when a call that was ringing ends — answered, declined, or never picked up. Distinct from
    * `onCall`, which announces the ring itself: an outcome must never re-enter that path, or a call
-   * being declined would look like a fresh incoming call and (with auto-reject on) be answered.
+   * being declined would look like a fresh incoming call and (with auto-reject on) be answered. Baileys
+   * only: whatsapp-web.js reports the ring, never its outcome.
    */
   onCallOutcome?: (event: CallOutcomeEvent) => void;
   /**
@@ -1250,7 +1296,19 @@ export interface MessageOperationsCapability {
 
   getMessageReactions(chatId: string, messageId: string): Promise<MessageReaction[]>;
 
-  deleteMessage(chatId: string, messageId: string, forEveryone?: boolean): Promise<void>;
+  /**
+   * Get per-participant delivery and read receipts for an own (fromMe) message.
+   * Returns delivery, read, and played participant lists with timestamps.
+   */
+  getMessageReceipts(chatId: string, messageId: string): Promise<MessageReceipts>;
+
+  /**
+   * Delete a message. Resolves the id the engine keys the deleted message by, when it reports one, so the caller can
+   * clear the stored copy under that id too: whatsapp-web.js resolves the serialized id of the message it found, which
+   * differs from the id it was given when that was the bare key id of a message it keys by the serialized id. An engine
+   * that keys the message by the id it was given (Baileys) resolves nothing.
+   */
+  deleteMessage(chatId: string, messageId: string, forEveryone?: boolean): Promise<string | void>;
 
   /**
    * Edit the body of a text message. Only the account's OWN messages can be edited; engines reject
@@ -1364,6 +1422,13 @@ export interface ContactCapability {
    * to resolve it.
    */
   resolveContactPhone(contactId: string): Promise<string | null>;
+
+  /**
+   * The `<lid>@lid` WhatsApp holds for a phone number, the reverse of {@link resolveContactPhone}, or null
+   * when it holds none (an unregistered number answers the same). A read: the gateway records nothing from it.
+   * A lookup that went unanswered rejects instead of answering null.
+   */
+  getContactLid(number: string): Promise<string | null>;
 
   getProfilePicture(contactId: string): Promise<string | null>;
 
@@ -1550,9 +1615,10 @@ export interface LabelCapability {
   addLabelToChat(chatId: string, labelId: string): Promise<void>;
 
   /**
-   * Create or update a label, keyed on `label.id`. One operation, not two: the engines express both
+   * Create or update a label, keyed on `label.id`. One operation, not two: Baileys expresses both
    * through a single app-state write, and which one happens depends on whether the id already
-   * exists. Only fields that are set are changed.
+   * exists. The write replaces the whole label: a field left unset is not kept (a colour-only write
+   * clears the name). whatsapp-web.js cannot write labels and throws EngineNotSupportedError.
    */
   upsertLabel(label: LabelInput): Promise<void>;
 
@@ -1668,9 +1734,10 @@ export interface StoredChatMessage {
 }
 
 /**
- * Reads the newest stored message of the chat a write is for, across the chat's id forms. Engines
- * call it only when they know no message of the chat themselves, so a lookup costs nothing when it is
- * not needed; it resolves null when the gateway stored none.
+ * Reads the newest stored message of the chat a write is for, across the chat's id forms, among the rows
+ * of the account the engine is linked to. Engines call it only when they know no message of the chat
+ * themselves, so a lookup costs nothing when it is not needed; it resolves null when the gateway stored
+ * none.
  */
 export type StoredChatMessageLookup = () => Promise<StoredChatMessage | null>;
 

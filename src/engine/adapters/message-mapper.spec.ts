@@ -124,6 +124,28 @@ describe('buildIncomingMessageBase', () => {
     expect(r.mentionedIds).toEqual(['222@lid', '333@lid']);
   });
 
+  it('maps isForwarded and forwardingScore for a forwarded message', () => {
+    const r = buildIncomingMessageBase({ ...base, isForwarded: true, forwardingScore: 1 });
+    expect(r.isForwarded).toBe(true);
+    expect(r.forwardingScore).toBe(1);
+  });
+
+  it('omits forwardingScore when a forwarded message reports none (whatsapp-web.js defaults it to 0)', () => {
+    const r = buildIncomingMessageBase({ ...base, isForwarded: true, forwardingScore: 0 });
+    expect(r.isForwarded).toBe(true);
+    expect(r).not.toHaveProperty('forwardingScore');
+  });
+
+  it('omits the forward fields for a message that was not forwarded', () => {
+    for (const r of [
+      buildIncomingMessageBase(base),
+      buildIncomingMessageBase({ ...base, isForwarded: false, forwardingScore: 0 }),
+    ]) {
+      expect(r).not.toHaveProperty('isForwarded');
+      expect(r).not.toHaveProperty('forwardingScore');
+    }
+  });
+
   it('omits mentionedIds when absent or empty', () => {
     expect(buildIncomingMessageBase(base).mentionedIds).toBeUndefined();
     expect(buildIncomingMessageBase({ ...base, mentionedIds: [] }).mentionedIds).toBeUndefined();
@@ -261,6 +283,14 @@ describe('mapContactFields', () => {
       expect('verifiedName' in r).toBe(false);
       expect('name' in r).toBe(false);
       expect('labels' in r).toBe(false);
+    });
+
+    it('reads the id under the name a renamed WA Web build gives it', () => {
+      // WA Web 2.3000.x serializes a Wid as `$1` instead of `_serialized` (#747).
+      expect(mapContactFields({ id: { $1: '584145200715@c.us' }, number: '584145200715' }, true)).toEqual({
+        id: '584145200715@c.us',
+        number: '584145200715',
+      });
     });
 
     it('returns an empty object when nothing is set', () => {

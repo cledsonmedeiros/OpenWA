@@ -125,6 +125,10 @@ POSTGRES_SCHEMA=public   # Default behavior (historical)
 - The dashboard built-in database (`POSTGRES_BUILTIN=true`) always uses `public`
 - External/managed PostgreSQL: run `CREATE SCHEMA <name>;` once before first startup
 - SQLite ignores this setting
+- On PostgreSQL 12 or older, `gen_random_uuid()` comes from `pgcrypto`, which must live in this schema or in
+  `public`. A migration that needs it and finds it in another schema stops the boot and names that schema; a superuser
+  moves it with `ALTER EXTENSION pgcrypto SET SCHEMA public;`, after which anything else that calls it under the old
+  schema name must use `public`
 - `scripts/backup.sh` dumps a schema other than `public` alone, with the `pg_trgm` and `unaccent` extensions, and
   `pgcrypto` only when it lives in that schema (PostgreSQL 12 or older, where the migrations create it there for the
   id defaults), so a database shared with other applications is neither read nor restored past it. That dump needs
@@ -429,6 +433,10 @@ Set them at creation with `POST /api/sessions`, or on an existing session with
 it does not mention keeps its stored value, and an explicit `null` clears a key back to the default
 above (the only way back to unlimited reconnect attempts once a cap is set).
 
+Anything else in `config` is stored as sent and never read, but `POST /api/sessions` refuses a `config` over
+16384 bytes as JSON, because every read of a session loads the whole column. The limit applies at creation: a
+stored row above it, restored or created earlier, still loads and still takes the patch.
+
 When each takes effect differs, because each is read at a different moment: `autoRejectCalls` is
 re-read from this row on every incoming call, so a patch applies to the next call. The two reconnect
 keys are read once per `start()` into the in-memory reconnect state, so a patch applies on the next
@@ -592,7 +600,7 @@ CREATE TABLE api_keys (
     id VARCHAR PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
     "keyHash" VARCHAR(64) NOT NULL,                -- UNIQUE index
-    "keyPrefix" VARCHAR(12) NOT NULL,              -- shown in the UI; the full key is never stored
+    "keyPrefix" VARCHAR(12) NOT NULL,              -- shown in the UI; the full key is never stored ("(master key)" for the API_MASTER_KEY seed)
     role VARCHAR(20) NOT NULL DEFAULT 'operator',  -- admin | operator | viewer
     "allowedIps" TEXT,                             -- simple-array (comma-joined), null = any IP
     "allowedSessions" TEXT,                        -- simple-array, null = all sessions
@@ -888,7 +896,7 @@ OpenWA runs **two separate TypeORM connections**, each with its own migrations d
 
 Migrations are hand-authored and idempotent (`IF NOT EXISTS`) so they are safe to adopt on a database originally created by `synchronize`. The two connections differ in how schema is managed:
 
-- **data** — `synchronize` defaults **off**, so this connection is migration-managed by default. On PostgreSQL `migrationsRun` is hardcoded on, and `DATABASE_SYNCHRONIZE=true` is rejected outright at boot validation (it would drop the migration-created `body_ts` tsvector column that `/search` depends on). The PostgreSQL chain runs at boot under a session-level advisory lock, so replicas that start together apply it once (`src/database/pg-boot-migrations.ts`); a PgBouncer in transaction pooling mode runs each transaction on whichever server connection is free, so the lock does not stay with the session that took it: point the data connection at PostgreSQL directly or at a pooler in session mode. On SQLite there is no such rejection and `migrationsRun` is the inverse of `synchronize` — so an opted-in `DATABASE_SYNCHRONIZE=true` switches the data connection to entity-synchronized schema and turns its migration chain **off**; only the deduplication of terminal `webhook_delivery_failures` rows still runs, ahead of the schema synchronization at every boot.
+- **data** — `synchronize` defaults **off**, so this connection is migration-managed by default. On PostgreSQL `migrationsRun` is hardcoded on, and `DATABASE_SYNCHRONIZE=true` is rejected outright at boot validation (it would drop the migration-created `body_ts` tsvector column that `/search` depends on). The PostgreSQL chain runs at boot under a session-level advisory lock, so replicas that start together apply it once (`src/database/pg-boot-migrations.ts`); a PgBouncer in transaction pooling mode runs each transaction on whichever server connection is free, so the lock does not stay with the session that took it: point the data connection at PostgreSQL directly or at a pooler in session mode. On SQLite there is no such rejection and `migrationsRun` is the inverse of `synchronize` — so an opted-in `DATABASE_SYNCHRONIZE=true` switches the data connection to entity-synchronized schema and turns its migration chain **off**. These still run at every boot, in this order: the deduplication of terminal `webhook_delivery_failures` rows (once that table exists), ahead of the schema synchronization; after it, the check of the SQLite full-text index with a rebuild when it no longer matches `messages` (the `RepairSqliteMessageFts` note in [§5.3.8](#538-other-data-connection-tables)); unless `SEARCH_ENABLED=false`, the search provider, which creates `messages_fts` when it is missing, re-indexes it when it holds rows `messages` no longer has, adds the rows it lacks and replaces its three sync triggers; and the conversion of legacy message types (`MessageTypeBackfillService`). With `SEARCH_CONTAINS_ENABLED=true` the provider also builds `messages_trgm` in batches once the HTTP listener is up, creating it when it is missing and emptying and refilling it when its row count or its triggers do not match.
 
   The data connection sends no session setting in the startup packet, which PgBouncer refuses for `statement_timeout`: the zone, the runtime `statement_timeout` and a custom schema's `search_path` are set by a statement on each new connection, and the boot lock connection turns `statement_timeout` off the same way, so PgBouncer in session mode needs no `ignore_startup_parameters` entry.
 
@@ -948,10 +956,11 @@ src/database/migrations/           # data connection (pluggable)
 ├── 1790812800000-AddMessageWindowIndexes.ts   # compound timestamp indexes for message-time pagination
 ├── 1791100000000-AddIntegrationDeliveryFailureDeliveryIndex.ts   # (pluginId, instanceId, deliveryId) index for the dead-letter guards
 ├── 1791200000000-AddWebhookOutboxSessionIndex.ts   # (sessionId) index for the per-session outbox delete
-├── 1791300000000-BackfillLegacyMessageTypes.ts   # converts raw wwebjs message types to the neutral vocabulary, once
+├── 1791300000000-BackfillLegacyMessageTypes.ts   # converts raw wwebjs message types to the neutral vocabulary: once as a migration, at every boot under DATABASE_SYNCHRONIZE=true, and inside every replace-all data import
 ├── 1791400000000-AddLidMappingReportSource.ts   # distinguishes mapping reports from cached display data
 ├── 1791600000000-RepairSqliteMessageFts.ts   # rebuilds the SQLite full-text index when it no longer matches messages
-└── 1791700000000-AddChatStateDeletedAt.ts   # chat_states.deletedAt (when WhatsApp deleted the chat)
+├── 1791700000000-AddChatStateDeletedAt.ts   # chat_states.deletedAt (when WhatsApp deleted the chat)
+└── 1791800000000-AddStatusMediaPathIndex.ts   # partial index on status_updates.mediaPath (orphan sweep)
 ```
 
 > [!NOTE]
@@ -1032,7 +1041,7 @@ The other interval-based prunes are the same shape: one prune at startup, then a
 - **`webhook_delivery_failures`**: `WebhookService.onModuleInit()` (`src/modules/webhook/webhook.service.ts`), window `WEBHOOK_FAILURE_RETENTION_DAYS` (default 90; ≤ 0 disables the prune and logs that it is off). The replay `payload` has its own, shorter window: `WEBHOOK_FAILURE_PAYLOAD_RETENTION_HOURS` (default 0, store none) clears expired payloads at startup and hourly; at 0 one startup pass clears any payload an earlier setting left.
 - **`webhook_outbox_events`**: `WebhookOutboxService.onModuleInit()` (`src/modules/webhook/webhook-outbox.service.ts`), window `WEBHOOK_OUTBOX_RETENTION_DAYS` (default 7). Only settled rows are deleted; `pending` and `queued` rows can still be replayed and are never pruned on age. A non-positive value does **not** disable the prune: a settled row carries no payload, so the service warns and falls back to 7 days.
 - **`ingress_events`** and **`integration_delivery_failures`** — `IntegrationRetentionService` (`src/modules/integration/integration-retention.service.ts`) prunes both in one timer on two independent windows. `INGRESS_DEDUP_RETENTION_DAYS` (default 7) bounds the dedup rows; a non-positive value does **not** disable it — an unpruned dedup table grows without bound for no functional gain, so the service warns and falls back to the 7-day default. `INGRESS_RETENTION_DAYS` (default 90) bounds the DLQ rows, where long retention can be a deliberate operator choice, so ≤ 0 disables that prune (and only that prune). An aged `pending` event that still carries its payload is first given a dead-letter row and a `failed` mark, and a later run prunes it; it is kept if that write fails. One whose instance or session was deleted, or whose queue job still owns the delivery, is settled and pruned without a dead-letter row.
-- **`messages`** and finished **`message_batches`**: `MessageRetentionService` (`src/modules/message/message-retention.service.ts`), window `MESSAGE_RETENTION_DAYS` (default 0, which keeps everything; boot rejects a value above 36500). Messages are deleted by `createdAt` in batches of 500 ids, at most 200 batches per run, so a run deletes at most 100,000 messages; a run that hits that limit logs a warning and is followed by another a minute later until the backlog is cleared. Pending and processing batches are never pruned. Once enabled, send pacing treats a contact silent for longer than the window as a new (cold) contact again, stats totals and search results shrink, archived media files are reclaimed by the chat-media orphan sweep, and a history sync does not write back messages older than the window. Search plugins get no `message:deleted` for pruned rows, so an external index keeps its copies.
+- **`messages`** and finished **`message_batches`**: `MessageRetentionService` (`src/modules/message/message-retention.service.ts`), window `MESSAGE_RETENTION_DAYS` (default 0, which keeps everything; boot rejects a value above 36500). Messages are deleted by `createdAt` in batches of 500 ids, at most 200 batches per run, so a run deletes at most 100,000 messages, and finished batches the same way; a run that hits either limit logs a warning and is followed by another a minute later until the backlog is cleared. Pending and processing batches are never pruned. Once enabled, send pacing treats a contact silent for longer than the window as a new (cold) contact again, stats totals and search results shrink, archived media files are reclaimed by the chat-media orphan sweep, and a history sync does not write back messages older than the window. Search plugins get no `message:deleted` for pruned rows, so an external index keeps its copies.
 - **`send_idempotency_keys`**: `SendIdempotencyService` (`src/modules/message/idempotency/send-idempotency.service.ts`) deletes rows past `expiresAt` (24 hours after the claim) on an hourly `setInterval`, with no startup run: a claim that collides with an expired row deletes it and claims the key itself, so a late prune never blocks a send.
 
 ### Status-Update TTL Sweep

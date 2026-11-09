@@ -21,7 +21,7 @@ export interface RequestOptions {
   method: HttpMethod;
   /** Full path beginning with `/`, e.g. `/api/sessions`; any other path is refused and nothing is sent. */
   path: string;
-  /** Query parameters, serialized into the URL. */
+  /** Query parameters, serialized into the URL: a plain object, a `URLSearchParams` or a `Map`. */
   query?: object;
   /** JSON-serializable request body. */
   body?: unknown;
@@ -44,7 +44,7 @@ export interface ClientConfig {
   fetch?: FetchLike;
 }
 
-/** Stands in for an empty or dot id; encodeURIComponent output never contains it. */
+/** Stands in for an empty, dot or unencodable id; encodeURIComponent output never contains it. */
 const BLANK_SEGMENT = '\u0000';
 
 /**
@@ -56,21 +56,32 @@ const BLANK_SEGMENT = '\u0000';
  * An empty, `.` or `..` segment becomes {@link BLANK_SEGMENT}, which `send()`
  * rejects: fetch resolves dot segments before sending, and an empty one means
  * a required id was blank, so either would reach the parent resource instead
- * of the intended one. Marking it here rather than throwing keeps the refusal
- * a rejection of the returned promise, since resource methods are not async.
+ * of the intended one. So does an id holding a lone surrogate, which
+ * encodeURIComponent cannot encode. Marking it here rather than throwing keeps
+ * the refusal a rejection of the returned promise, since resource methods are
+ * not async.
  */
 export function encodeSegment(segment: string | number): string {
   const text = String(segment);
   if (text === '' || text === '.' || text === '..') return BLANK_SEGMENT;
-  return encodeURIComponent(text).replace(/%40/g, '@').replace(/%3A/g, ':').replace(/%2B/g, '+');
+  try {
+    return encodeURIComponent(text).replace(/%40/g, '@').replace(/%3A/g, ':').replace(/%2B/g, '+');
+  } catch {
+    // URIError for a lone surrogate: thrown here it would escape the promise the caller holds.
+    return BLANK_SEGMENT;
+  }
 }
 
-/** Build a URL with serialized query params, omitting `undefined`/`null` values. */
+/**
+ * Build a URL with serialized query params, omitting `undefined`/`null` values. `query` is a plain object, a
+ * `URLSearchParams` or a `Map`; the last two are iterated, since `Object.entries` lists none of their entries.
+ */
 export function buildUrl(baseUrl: string, path: string, query?: object): string {
   const base = baseUrl.replace(/\/$/, '');
   if (!query) return `${base}${path}`;
   const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(query)) {
+  const entries = query instanceof URLSearchParams || query instanceof Map ? query : Object.entries(query);
+  for (const [key, value] of entries) {
     if (value === undefined || value === null) continue;
     params.append(key, String(value));
   }
@@ -182,7 +193,9 @@ async function send<T>(
   const rawPath = tail.split(/[?#]/, 1)[0];
   let pathOnly = rawPath.replace(/[\t\n\r]/g, '');
   if (rawPath.length === tail.length) pathOnly = pathOnly.replace(/[\x00-\x20]+$/, '');
-  for (const segment of pathOnly.split(/[/\\]/).slice(1)) {
+  // %2F and %5C split too: a proxy that decodes them before it resolves dot segments reads an id sent as
+  // `..%2Fx` as `../x` and sends the call to another route.
+  for (const segment of pathOnly.split(/[/\\]|%2f|%5c/i).slice(1)) {
     const dots = segment.replace(/%2e/gi, '.');
     if (dots === '.' || dots === '..') {
       throw new TypeError(`OpenWA: dot path segment in ${JSON.stringify(options.path)}`);
