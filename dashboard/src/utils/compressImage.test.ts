@@ -34,7 +34,10 @@ test('compressImage draws at the target size and encodes a JPEG at the given qua
     createElement: () => ({
       width: 0,
       height: 0,
-      getContext: () => ({ drawImage: (_b: unknown, x: number, y: number, w: number, h: number) => drawn.push([x, y, w, h]) }),
+      getContext: () => ({
+        fillRect() {},
+        drawImage: (_b: unknown, x: number, y: number, w: number, h: number) => drawn.push([x, y, w, h]),
+      }),
       toBlob(cb: (b: Blob) => void, type: string, quality: number) {
         encoded = { type, quality };
         cb(new Blob([new Uint8Array([1, 2, 3])], { type }));
@@ -49,4 +52,29 @@ test('compressImage draws at the target size and encodes a JPEG at the given qua
   assert.equal(out.mimetype, 'image/jpeg');
   assert.equal(out.bytes, 3);
   assert.equal(out.base64, 'AQID');
+});
+
+test('a transparent image is flattened onto white before encoding, not onto JPEG black', async () => {
+  const calls: string[] = [];
+  (globalThis as Record<string, unknown>).createImageBitmap = async () => ({ width: 100, height: 50, close() {} });
+  (globalThis as Record<string, unknown>).document = {
+    createElement: () => {
+      const ctx = {
+        fillStyle: '',
+        fillRect: (x: number, y: number, w: number, h: number) =>
+          calls.push(`fill:${ctx.fillStyle}:${x},${y},${w},${h}`),
+        drawImage: () => calls.push('draw'),
+      };
+      return {
+        width: 0,
+        height: 0,
+        getContext: () => ctx,
+        toBlob: (cb: (b: Blob) => void, type: string) => cb(new Blob([new Uint8Array(1)], { type })),
+      };
+    },
+  };
+
+  await compressImage(new Blob(['x'], { type: 'image/png' }));
+
+  assert.deepEqual(calls, ['fill:#ffffff:0,0,100,50', 'draw']);
 });

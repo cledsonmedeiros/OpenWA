@@ -158,8 +158,12 @@ function ChannelPostBar({ sessionId, channelId, mediaSupported = false, progress
       // Only the images that went out leave the tray; the text stays if it did not go out.
       dropSent(result.sent.length);
       if (result.text) setText('');
+      // Every image out and failedAt past them: only the trailing text failed, which the operator can resend.
+      const onlyTextFailed = result.sent.length === batch.length;
       showWarningToast(
-        t('chats.channels.partialSent', { sent: result.sent.length, total: batch.length }),
+        onlyTextFailed
+          ? t('chats.channels.textFailed', { total: batch.length })
+          : t('chats.channels.partialSent', { sent: result.sent.length, total: batch.length }),
         result.error,
       );
       refetchAfterFailure();
@@ -208,7 +212,7 @@ function ChannelPostBar({ sessionId, channelId, mediaSupported = false, progress
             <option value="after">{t('chats.channels.textAfter')}</option>
             <option value="before">{t('chats.channels.textBefore')}</option>
           </select>
-          {liveProgress && liveProgress.status !== 'done' && (
+          {liveProgress?.status === 'sent' && (
             <span className="channel-batch-progress" role="status">
               {t('chats.channels.sending', { current: liveProgress.index + 1, total: liveProgress.total })}
             </span>

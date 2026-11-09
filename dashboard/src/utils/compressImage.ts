@@ -29,7 +29,7 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-/** Decode, resize and re-encode as JPEG. JPEG drops transparency; channel photos do not need it. */
+/** Decode, resize and re-encode as JPEG, transparent areas flattened onto white. */
 export async function compressImage(
   file: Blob,
   opts: { maxSide?: number; quality?: number } = {},
@@ -42,6 +42,9 @@ export async function compressImage(
     canvas.height = height;
     const context = canvas.getContext('2d');
     if (!context) throw new Error('canvas 2d context unavailable');
+    // JPEG has no alpha: without a backdrop the transparent pixels of a PNG encode as black.
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, width, height);
     context.drawImage(bitmap, 0, 0, width, height);
     const blob = await new Promise<Blob>((resolve, reject) =>
       canvas.toBlob(

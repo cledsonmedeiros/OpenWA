@@ -4062,7 +4062,8 @@ while the channel reports `mediaSupported: true`.
 
 **Auth:** API key (OPERATOR) · **Scope:** session-scoped; a key restricted to specific chats gets `403`
 
-**Headers:** `Idempotency-Key` (optional) — same contract as the message send routes.
+**Headers:** `Idempotency-Key` (optional) — same contract as the message send routes. A retry must resend
+the identical body, `postId` included: a new `postId` under the same key answers `422`.
 
 **Request body** — `PostChannelImagesDto`
 

@@ -62,7 +62,8 @@ export class ChannelsResource {
    * Post 1-10 images to a channel the session owns or administers, one post per image in order, plus
    * an optional text post before or after them. Live progress arrives on the socket as
    * `channel.post.progress`, correlated by `body.postId`. Nothing is re-sent: a failure after something
-   * went out answers with `failedAt` set. Pass `idempotencyKey` to make a retry replay that answer.
+   * went out answers with `failedAt` set. Pass `idempotencyKey` to make a retry replay that answer; the
+   * retry must resend the identical body, `postId` included.
    */
   postImages(
     sessionId: string,

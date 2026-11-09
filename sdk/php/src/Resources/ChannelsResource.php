@@ -61,7 +61,8 @@ class ChannelsResource
     /**
      * Post 1-10 images to a channel the session owns or administers, one post per image in order, plus
      * an optional text post. Progress arrives on the socket as `channel.post.progress`. Nothing is
-     * re-sent: a failure after something went out answers with `failedAt` set.
+     * re-sent: a failure after something went out answers with `failedAt` set. A retry under the same
+     * idempotency key must resend the identical body, `postId` included.
      *
      * @param array<string,mixed> $body
      * @return array<string,mixed>

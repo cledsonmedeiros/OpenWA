@@ -214,7 +214,8 @@
       "moveUp": "Sposta {{name}} su",
       "moveDown": "Sposta {{name}} giù",
       "removeImage": "Rimuovi {{name}}",
-      "uncertainBatch": "La connessione si è interrotta durante l'invio; {{count}} immagini confermate come pubblicate sono state rimosse. Controlla il canale prima di inviare il resto."
+      "uncertainBatch": "La connessione si è interrotta durante l'invio; {{count}} immagini confermate come pubblicate sono state rimosse. Controlla il canale prima di inviare il resto.",
+      "textFailed": "Tutte le {{total}} immagini sono state pubblicate, ma il post di testo non è riuscito."
     },
     "errors": {
       "loadSessions": "Impossibile caricare le sessioni",

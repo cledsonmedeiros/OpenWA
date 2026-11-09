@@ -209,7 +209,8 @@
       "moveUp": "Move {{name}} up",
       "moveDown": "Move {{name}} down",
       "removeImage": "Remove {{name}}",
-      "uncertainBatch": "The connection failed mid-batch; {{count}} images confirmed as posted were removed. Check the channel before sending the rest."
+      "uncertainBatch": "The connection failed mid-batch; {{count}} images confirmed as posted were removed. Check the channel before sending the rest.",
+      "textFailed": "All {{total}} images were posted, but the text post failed."
     },
     "errors": {
       "loadSessions": "Failed to load sessions",

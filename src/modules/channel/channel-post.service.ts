@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, HttpException, Injectable } from '@nestjs/common';
 import { ChannelService } from './channel.service';
 import { MessageService } from '../message/message.service';
 import { EventsGateway } from '../events/events.gateway';
@@ -54,10 +54,10 @@ export class ChannelPostService {
 
     const stop = (error: unknown, failedAt: number): ChannelPostResult => {
       if (!anythingSent) throw error;
-      return {
-        status: 207,
-        body: { ...body, failedAt, error: error instanceof Error ? error.message : String(error) },
-      };
+      // Only an HTTP exception's message is written for clients; anything else (a page error, a stack)
+      // stays server-side, as Nest's own 500 handling would keep it.
+      const message = error instanceof HttpException ? error.message : 'The send failed.';
+      return { status: 207, body: { ...body, failedAt, error: message } };
     };
     const sendText = async () => {
       const res = await this.messages.sendText(sessionId, {

@@ -61,7 +61,8 @@ class ChannelsResource:
         """Post 1-10 images to a channel the session owns or administers, one post per image in order.
 
         Progress arrives on the socket as ``channel.post.progress``. Nothing is re-sent: a failure after
-        something went out answers with ``failedAt`` set; an idempotency key makes a retry replay it.
+        something went out answers with ``failedAt`` set; an idempotency key makes a retry replay it, as
+        long as the retry resends the identical body, ``postId`` included.
         """
         return self._http.request(
             "POST",

@@ -47,7 +47,8 @@ func (s *ChannelsService) Create(ctx context.Context, sessionID string, body Cre
 // PostImages posts 1-10 images to a channel the session owns or administers, one post per image in
 // order, plus an optional text post. Progress arrives on the socket as channel.post.progress. Nothing is
 // re-sent: a failure after something went out answers with FailedAt set. A key set with
-// WithIdempotencyKey makes a retry replay that answer.
+// WithIdempotencyKey makes a retry replay that answer; the retry must resend the identical body,
+// PostID included.
 func (s *ChannelsService) PostImages(ctx context.Context, sessionID, channelID string, body PostChannelImagesRequest) (*ChannelPostResult, error) {
 	var out ChannelPostResult
 	err := s.client.do(ctx, "POST", s.base(sessionID)+"/"+pathEscape(channelID)+"/posts/images", nil, body, &out)

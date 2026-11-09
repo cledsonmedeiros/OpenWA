@@ -51,7 +51,7 @@ before(async () => {
   // jsdom decodes no images and has no 2d canvas: stub the two calls compressImage makes.
   (globalThis as Record<string, unknown>).createImageBitmap = () => Promise.resolve({ width: 4000, height: 3000, close() {} });
   const canvasProto = window.HTMLCanvasElement.prototype as unknown as Record<string, unknown>;
-  canvasProto.getContext = () => ({ drawImage() {} });
+  canvasProto.getContext = () => ({ fillRect() {}, drawImage() {} });
   canvasProto.toBlob = function (cb: (b: Blob) => void, type: string) {
     cb(new Blob([new Uint8Array(encodedBytes)], { type }));
   };
@@ -318,4 +318,48 @@ test('a failed HTTP answer after progress frames confirmed some images removes t
   release!();
   await rtl.waitFor(() => assert.deepEqual(trayNames(), ['c.png']));
   assert.ok(rtl.screen.getByText('The connection failed mid-batch; 2 images confirmed as posted were removed. Check the channel before sending the rest.'));
+});
+
+test('a failed progress frame is not shown as "Sending"', async () => {
+  holdNext = true;
+  const { rerender } = renderBar({ mediaSupported: true });
+  pick(['a.png', 'b.png']);
+  await rtl.waitFor(() => assert.equal(trayNames().length, 2));
+  rtl.fireEvent.click(sendButton());
+  await rtl.waitFor(() => assert.equal(sent.length, 1));
+  const postId = (sent[0].body as { postId: string }).postId;
+  rerender(
+    wrap(
+      createElement(ChannelPostBar, {
+        sessionId: 's1',
+        channelId: 'c@newsletter',
+        mediaSupported: true,
+        progress: { postId, channelId: 'c@newsletter', index: 1, total: 2, mode: 'individual', status: 'failed' },
+      } as never),
+    ),
+  );
+  try {
+    assert.equal(rtl.screen.queryByText(/^Sending /), null);
+  } finally {
+    nextBody = { mode: 'individual', sent: [] };
+    release!();
+  }
+});
+
+test('when every image went out and only the trailing text failed, it says exactly that and keeps the text', async () => {
+  nextStatus = 207;
+  nextBody = {
+    mode: 'individual',
+    sent: [0, 1].map(index => ({ index, messageId: `m${index}` })),
+    failedAt: 2,
+    error: 'text failed',
+  };
+  renderBar({ mediaSupported: true });
+  pick(['a.png', 'b.png']);
+  await rtl.waitFor(() => assert.equal(trayNames().length, 2));
+  type('fim');
+  rtl.fireEvent.click(sendButton());
+  await rtl.waitFor(() => assert.ok(rtl.screen.getByText('All 2 images were posted, but the text post failed.')));
+  assert.equal(trayNames().length, 0);
+  assert.equal(input().value, 'fim');
 });

@@ -24714,7 +24714,7 @@
         "properties": {
           "postId": {
             "type": "string",
-            "description": "Caller-generated UUID for this batch. Correlates the `channel.post.progress` socket frames with this request; it is not an idempotency key (send `Idempotency-Key` for that).",
+            "description": "Caller-generated UUID for this batch. Correlates the `channel.post.progress` socket frames with this request; it is not an idempotency key (send `Idempotency-Key` for that). It is part of the body the key covers, so a retry must resend the identical body, this `postId` included; a new one answers 422.",
             "example": "3f9a1c2e-5b6d-4e7f-8a9b-0c1d2e3f4a5b"
           },
           "images": {

@@ -104,6 +104,16 @@ describe('ChannelPostService.postImages', () => {
     expect(messages.sendText).not.toHaveBeenCalled();
   });
 
+  it('a 207 never echoes the raw text of an error that is not an HTTP exception', async () => {
+    const { service, messages } = setup();
+    messages.sendImage
+      .mockImplementationOnce(() => Promise.resolve({ messageId: 'i-0' }))
+      .mockImplementationOnce(() => Promise.reject(new Error('page threw {"build":"2.3000","stack":"secret"}')));
+    const res = await service.postImages('s1', CHANNEL, dto(2));
+    expect(res.status).toBe(207);
+    expect(res.body.error).toBe('The send failed.');
+  });
+
   it('a leading text that went out turns a first-image failure into a 207', async () => {
     const { service } = setup({ failImageAt: 0 });
     const res = await service.postImages('s1', CHANNEL, dto(2, { text: 'oi', textPosition: 'before' }));

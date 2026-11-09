@@ -67,7 +67,7 @@ public final class ChannelsResource {
      * Post 1-10 images to a channel the session owns or administers, one post per image in order, plus an
      * optional text post. Progress arrives on the socket as {@code channel.post.progress}. Nothing is re-sent:
      * a failure after something went out answers with {@code failedAt} set; an idempotency key makes a retry
-     * replay that answer.
+     * replay that answer, as long as the retry resends the identical body, {@code postId} included.
      */
     public ChannelPostResult postImages(
         String sessionId, String channelId, PostChannelImagesRequest body, String idempotencyKey) {

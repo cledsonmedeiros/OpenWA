@@ -209,7 +209,8 @@
       "moveUp": "{{name}} nach oben",
       "moveDown": "{{name}} nach unten",
       "removeImage": "{{name}} entfernen",
-      "uncertainBatch": "Die Verbindung brach mitten im Versand ab; {{count}} als gepostet bestätigte Bilder wurden entfernt. Prüfe den Kanal, bevor du den Rest sendest."
+      "uncertainBatch": "Die Verbindung brach mitten im Versand ab; {{count}} als gepostet bestätigte Bilder wurden entfernt. Prüfe den Kanal, bevor du den Rest sendest.",
+      "textFailed": "Alle {{total}} Bilder wurden gepostet, aber der Textbeitrag ist fehlgeschlagen."
     },
     "errors": {
       "loadSessions": "Sitzungen konnten nicht geladen werden",

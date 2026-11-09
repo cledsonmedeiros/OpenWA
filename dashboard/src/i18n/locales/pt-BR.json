@@ -214,7 +214,8 @@
       "moveUp": "Mover {{name}} para cima",
       "moveDown": "Mover {{name}} para baixo",
       "removeImage": "Remover {{name}}",
-      "uncertainBatch": "A conexão caiu no meio do envio; {{count}} imagens confirmadas como publicadas foram removidas. Confira o canal antes de enviar o restante."
+      "uncertainBatch": "A conexão caiu no meio do envio; {{count}} imagens confirmadas como publicadas foram removidas. Confira o canal antes de enviar o restante.",
+      "textFailed": "As {{total}} imagens foram publicadas, mas o post de texto falhou."
     },
     "errors": {
       "loadSessions": "Erro ao carregar as sessões",

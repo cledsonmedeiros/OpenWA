@@ -209,7 +209,8 @@
       "moveUp": "Pindahkan {{name}} ke atas",
       "moveDown": "Pindahkan {{name}} ke bawah",
       "removeImage": "Hapus {{name}}",
-      "uncertainBatch": "Koneksi terputus di tengah pengiriman; {{count}} gambar yang terkonfirmasi terposting telah dihapus. Periksa saluran sebelum mengirim sisanya."
+      "uncertainBatch": "Koneksi terputus di tengah pengiriman; {{count}} gambar yang terkonfirmasi terposting telah dihapus. Periksa saluran sebelum mengirim sisanya.",
+      "textFailed": "Semua {{total}} gambar terposting, tetapi postingan teks gagal."
     },
     "errors": {
       "loadSessions": "Gagal memuat sesi",
